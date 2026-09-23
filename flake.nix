@@ -70,6 +70,10 @@
         };
       };
 
+      closures = pkgs.callPackage ./nix/closures.nix {
+        nixpkgsRev = nixpkgs.rev or "";
+      };
+
       goTests = pkgs.runCommand "k3snix-go-test" {
         nativeBuildInputs = [ pkgs.go ];
         inherit src;
@@ -92,6 +96,7 @@
           k3snix
           k3snixWrapped
           image
+          closures
           ;
         default = k3snix;
         nix-snapshotter = nix-snapshotter.packages.${system}.nix-snapshotter;
@@ -152,6 +157,7 @@
       checks.${system} = {
         inherit goTests;
         k3snix = k3snix;
+        closures = closures;
       };
     };
 }
