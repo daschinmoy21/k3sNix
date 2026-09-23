@@ -10,7 +10,7 @@ import (
 
 func fixtureClosure() closure.Closure {
 	return closure.Closure{Label: "e2e", Paths: []closure.Path{
-		{Path: "/nix/store/dddddddddddddddddddddddddddddd-d", NarSize: 80},
+		{Path: "/nix/store/dddddddddddddddddddddddddddddddd-d", NarSize: 80},
 		{Path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a", NarSize: 10},
 		{Path: "/nix/store/cccccccccccccccccccccccccccccccc-c", NarSize: 40},
 		{Path: "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b", NarSize: 20},
