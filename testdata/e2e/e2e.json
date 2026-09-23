@@ -1,0 +1,10 @@
+{
+  "label": "e2e",
+  "root": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a",
+  "paths": [
+    { "path": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a", "narSize": 10 },
+    { "path": "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b", "narSize": 20 },
+    { "path": "/nix/store/cccccccccccccccccccccccccccccccc-c", "narSize": 40 },
+    { "path": "/nix/store/dddddddddddddddddddddddddddddd-d", "narSize": 80 }
+  ]
+}

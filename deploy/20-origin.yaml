@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k3snix-origin
+  namespace: k3snix
+  labels:
+    app: k3snix-origin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k3snix-origin
+  template:
+    metadata:
+      labels:
+        app: k3snix-origin
+    spec:
+      containers:
+        - name: origin
+          image: k3snix:dev
+          imagePullPolicy: Never
+          command: ["/bin/k3snix-agent"]
+          args:
+            - -listen=:9877
+            - -store=/nix/store
+          ports:
+            - containerPort: 9877
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9877
+          volumeMounts:
+            - name: nixstore
+              mountPath: /nix/store
+              readOnly: true
+      volumes:
+        - name: nixstore
+          hostPath:
+            path: /nix/store
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k3snix-origin
+  namespace: k3snix
+  labels:
+    app: k3snix-origin
+spec:
+  selector:
+    app: k3snix-origin
+  ports:
+    - port: 9877
+      targetPort: 9877
