@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k3snix-agent
+  namespace: k3snix
+  labels:
+    app: k3snix-agent
+spec:
+  selector:
+    matchLabels:
+      app: k3snix-agent
+  template:
+    metadata:
+      labels:
+        app: k3snix-agent
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: k3snix:dev
+          imagePullPolicy: Never
+          command: ["/bin/k3snix-agent"]
+          args:
+            - -listen=:9860
+            - -store=/data/store
+            - -catalog=/catalog
+            - -seed-by-node
+            - -seed-label=e2e
+            - -origin=http://k3snix-origin.k3snix.svc.cluster.local:9877
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - containerPort: 9860
+              hostPort: 9860
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9860
+          volumeMounts:
+            - name: store
+              mountPath: /data/store
+            - name: catalog
+              mountPath: /catalog
+              readOnly: true
+      volumes:
+        - name: store
+          emptyDir: {}
+        - name: catalog
+          configMap:
+            name: k3snix-catalog

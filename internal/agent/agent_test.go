@@ -383,6 +383,42 @@ func TestNarinfoMatchesNARBody(t *testing.T) {
 	}
 }
 
+func TestDumpMissingTempDir(t *testing.T) {
+	// Minimal container images ship no /tmp; the dump must create the
+	// system temp dir instead of failing with ENOENT.
+	dir := t.TempDir()
+	mustDir(t, filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b"))
+	mustFile(t, filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b", "payload"), []byte("seeded"))
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "no-such-tmpdir"))
+	s := newServer(t, dir)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("narinfo status %d body %s", resp.StatusCode, info)
+	}
+	fields := parseNarinfo(t, info)
+	if fields["StorePath"] == "" || fields["NarHash"] == "" {
+		t.Fatalf("bad narinfo %q", info)
+	}
+
+	narResp, err := http.Get(srv.URL + "/nar/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.nar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(narResp.Body)
+	narResp.Body.Close()
+	if narResp.StatusCode != 200 || !bytes.Contains(body, []byte("seeded")) {
+		t.Fatalf("nar status %d body %q", narResp.StatusCode, body)
+	}
+}
+
 func TestNarinfoNotFound(t *testing.T) {
 	s := newServer(t, t.TempDir())
 	srv := httptest.NewServer(s.Handler())
