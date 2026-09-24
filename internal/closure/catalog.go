@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -18,34 +17,38 @@ func LoadCatalog(dir string) (*Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load catalog %s: %w", dir, err)
 	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
+	
 	cat := &Catalog{
 		byFingerprint: map[string]Closure{},
 		byLabel:       map[string]string{},
 	}
-	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(dir, name))
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("load catalog %s: %w", name, err)
+			return nil, fmt.Errorf("load catalog %s: %w", e.Name(), err)
 		}
 		c, err := Parse(data)
 		if err != nil {
-			return nil, fmt.Errorf("load catalog %s: %w", name, err)
+			return nil, fmt.Errorf("load catalog %s: %w", e.Name(), err)
 		}
 		fingerprint := c.Fingerprint()
 		if _, ok := cat.byFingerprint[fingerprint]; !ok {
 			cat.byFingerprint[fingerprint] = c
 		}
-		if c.Label != "" {
-			cat.byLabel[c.Label] = fingerprint
+		if c.Label == "" {
+			continue
 		}
+
+		if prev, ok := cat.byLabel[c.Label]; ok && prev != fingerprint {
+			return nil, fmt.Errorf(
+				"load catalog %s: label %q already maps to closure %s",path, c.Label, prev
+			)
+		}
+		cat.byLabel[c.Label] = fingerprint
 	}
 	return cat, nil
 }
