@@ -1,0 +1,19 @@
+{
+  "/nix/store/xl1h9i29pgq2q5cszjhm5wpfxfbbqwyi-hello-2.12.3": {
+    "ca": null,
+    "deriver": "/nix/store/2bkip97lh6y3dws9inyhjssyayh9vfhq-hello-2.12.3.drv",
+    "narHash": "sha256-T54mk8x6yhPXSyPQO6S0bctrbHYI4yS4aN1ZZMFXvcc=",
+    "narSize": 279624,
+    "references": [
+      "/nix/store/lm3pknxi0ipypy3lxh1wmm8wvvavdwrn-glibc-2.42-84",
+      "/nix/store/xl1h9i29pgq2q5cszjhm5wpfxfbbqwyi-hello-2.12.3"
+    ],
+    "registrationTime": 1790165835,
+    "signatures": [
+      "cache.nixos.org-1:0jU7KmqrnwhJ1YFukj6wLaYpHXph/+EHWvdWfgy6HS87lMhxID/CzXyAk0CbM/ay/m5KzEQ+IQgV33HLE/AbAA=="
+    ],
+    "storeDir": "/nix/store",
+    "ultimate": false,
+    "version": 1
+  }
+}
