@@ -17,7 +17,6 @@ func LoadCatalog(dir string) (*Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load catalog %s: %w", dir, err)
 	}
-	
 	cat := &Catalog{
 		byFingerprint: map[string]Closure{},
 		byLabel:       map[string]string{},
@@ -45,7 +44,7 @@ func LoadCatalog(dir string) (*Catalog, error) {
 
 		if prev, ok := cat.byLabel[c.Label]; ok && prev != fingerprint {
 			return nil, fmt.Errorf(
-				"load catalog %s: label %q already maps to closure %s",path, c.Label, prev
+				"load catalog %s: label %q already maps to closure %s", e.Name(), c.Label, prev,
 			)
 		}
 		cat.byLabel[c.Label] = fingerprint
