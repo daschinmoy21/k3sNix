@@ -105,6 +105,9 @@ func writeDirectory(w io.Writer, path string) error {
 }
 
 func writeRegular(w io.Writer, path string, info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return &os.PathError{Op: "Write", Path: path, Err: os.ErrInvalid}
+	}
 	if err := writeString(w, "regular"); err != nil {
 		return err
 	}
@@ -120,13 +123,19 @@ func writeRegular(w io.Writer, path string, info os.FileInfo) error {
 		return err
 	}
 
-	f, err := os.Open(path)
+	f, err := openNoFollow(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
-	return writeContents(w, f, info.Size())
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return &os.PathError{Op: "Write", Path: path, Err: os.ErrInvalid}
+	}
+	return writeContents(w, f, fi.Size())
 }
 
 func writeContents(w io.Writer, r io.Reader, size int64) error {
