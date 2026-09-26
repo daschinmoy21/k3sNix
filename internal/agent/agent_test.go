@@ -449,6 +449,99 @@ func TestCacheInfoHealthMetrics(t *testing.T) {
 	}
 }
 
+func TestStrictCacheRouting(t *testing.T) {
+	dir := t.TempDir()
+	mustDir(t, filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg"))
+	s := newServer(t, dir)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// Prefix probes, wrong lengths, invalid alphabet and a missing .nar
+	// suffix must all be rejected before any lookup or dump happens.
+	for _, path := range []string{
+		"/a.narinfo",        // 1-char prefix probe
+		"/aaaaaaaa.narinfo", // 8-char prefix probe
+		"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo", // 36 chars
+		"/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.narinfo",     // 'e' is not in nix base32
+		"/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",         // missing .nar suffix
+		"/nar/a.nar",                                    // short hash
+	} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Fatalf("%s status %d, want 404", path, resp.StatusCode)
+		}
+	}
+
+	// The canonical request still works.
+	resp, err := http.Get(srv.URL + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("canonical narinfo status %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestRequestBodyTooLarge(t *testing.T) {
+	s := newServer(t, t.TempDir())
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	body := `{"label":"` + strings.Repeat("x", 2<<20) + `"}`
+	resp, err := http.Post(srv.URL+"/v1/missing_bytes", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413", resp.StatusCode)
+	}
+}
+
+func TestDumpEvictionRemovesTempFile(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg")
+	b := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-pkg")
+	mustDir(t, a)
+	mustDir(t, b)
+	s := newServer(t, dir)
+	s.DumpTTL = 10 * time.Millisecond
+	s.DumpFunc = func(path string, w io.Writer) error {
+		_, err := w.Write([]byte("payload:" + path))
+		return err
+	}
+
+	res, err := s.dumpCoalesced(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(res.file); err != nil {
+		t.Fatalf("temp file missing after dump: %v", err)
+	}
+
+	time.Sleep(30 * time.Millisecond) // outlive DumpTTL
+
+	// The next dump request sweeps the idle entry and unlinks its file.
+	if _, err := s.dumpCoalesced(b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(res.file); !os.IsNotExist(err) {
+		t.Fatalf("evicted temp file still on disk (stat err: %v)", err)
+	}
+	s.mu.Lock()
+	n := len(s.dumps)
+	s.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("dumps map has %d entries, want 1", n)
+	}
+}
+
 func parseNarinfo(t *testing.T, body []byte) map[string]string {
 	t.Helper()
 	fields := map[string]string{}

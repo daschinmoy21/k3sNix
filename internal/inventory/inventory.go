@@ -5,7 +5,6 @@ package inventory
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,8 +17,14 @@ type Store struct {
 	Dir string
 	TTL time.Duration
 
+	// refreshMu serializes scans. Without it two overlapping Refreshes
+	// publish in lock-acquisition order, so an older ReadDir can finish
+	// last and overwrite a newer listing.
+	refreshMu sync.Mutex
+
 	mu      sync.Mutex
-	have    map[string]uint64 // full path -> Lstat size
+	have    map[string]struct{} // set of full paths present in Dir
+	byHash  map[string]string   // 32-char store hash -> full path
 	fetched time.Time
 }
 
@@ -32,40 +37,60 @@ func New(dir string) *Store {
 	return &Store{Dir: dir, TTL: 2 * time.Second}
 }
 
-// Refresh rescans the store directory. Keys are full paths, values are the
-// Lstat sizes. Entries whose name starts with "." are skipped.
+// Refresh rescans the store directory. Keys are full paths. Entries whose
+// name starts with "." are skipped. Scans run one at a time.
 func (s *Store) Refresh() error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	return s.refresh()
+}
+
+func (s *Store) refresh() error {
 	ents, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return err
 	}
-	have := make(map[string]uint64, len(ents))
+	have := make(map[string]struct{}, len(ents))
+	byHash := make(map[string]string, len(ents))
 	for _, e := range ents {
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		var size uint64
-		if info, err := e.Info(); err == nil {
-			size = uint64(info.Size())
+		path := filepath.Join(s.Dir, name)
+		have[path] = struct{}{}
+		if len(name) >= 32 {
+			if _, dup := byHash[name[:32]]; !dup {
+				byHash[name[:32]] = path
+			}
 		}
-		have[filepath.Join(s.Dir, name)] = size
 	}
 	s.mu.Lock()
 	s.have = have
+	s.byHash = byHash
 	s.fetched = time.Now()
 	s.mu.Unlock()
 	return nil
 }
 
-// snapshot returns the have-set, refreshing it first when stale. A failed
-// refresh keeps the previous listing.
-func (s *Store) snapshot() map[string]uint64 {
+// stale reports whether the listing needs a rescan.
+func (s *Store) stale() bool {
 	s.mu.Lock()
-	stale := s.TTL == 0 || s.have == nil || time.Since(s.fetched) > s.TTL
-	s.mu.Unlock()
-	if stale {
-		_ = s.Refresh()
+	defer s.mu.Unlock()
+	return s.TTL == 0 || s.have == nil || time.Since(s.fetched) > s.TTL
+}
+
+// snapshot returns the have-set, refreshing it first when stale. A failed
+// refresh keeps the previous listing. Refreshes are serialized and the
+// staleness is re-checked after acquiring the lock, so a caller that
+// queued behind another scan does not repeat it.
+func (s *Store) snapshot() map[string]struct{} {
+	if s.stale() {
+		s.refreshMu.Lock()
+		if s.stale() {
+			_ = s.refresh()
+		}
+		s.refreshMu.Unlock()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,21 +119,13 @@ func (s *Store) Missing(c closure.Closure) closure.Missing {
 	return closure.MissingAgainst(c, mapped)
 }
 
-// LookupHash returns the full path whose basename starts with hash, or ""
-// when nothing matches.
+// LookupHash returns the full path whose 32-character store hash equals
+// hash, or "" when nothing matches. Any other length never matches.
 func (s *Store) LookupHash(hash string) string {
-	have := s.snapshot()
-	names := make([]string, 0, len(have))
-	for p := range have {
-		names = append(names, p)
-	}
-	sort.Strings(names)
-	for _, p := range names {
-		if strings.HasPrefix(filepath.Base(p), hash) {
-			return p
-		}
-	}
-	return ""
+	s.snapshot() // refresh when stale; the index is read under mu below
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byHash[hash]
 }
 
 // Count is the number of listed store paths.

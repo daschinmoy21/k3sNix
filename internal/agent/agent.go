@@ -5,6 +5,7 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,6 +34,12 @@ type Server struct {
 	Log      *log.Logger
 	DumpFunc DumpFunc
 
+	// DumpTTL bounds how long a finished dump is reused. When it expires
+	// the entry and its temp file are evicted on the next dump request, so
+	// the temp directory cannot grow without bound. Zero means
+	// defaultDumpTTL.
+	DumpTTL time.Duration
+
 	// closures mirrors the catalog contents so narinfo can find references
 	// for a store path without enumerating the Catalog's private indexes.
 	closures []closure.Closure
@@ -55,13 +62,18 @@ type dumpCall struct {
 	done chan struct{}
 	res  dumpResult
 	err  error
+	used time.Time // last time a caller was handed this result
 }
+
+// defaultDumpTTL applies when Server.DumpTTL is unset.
+const defaultDumpTTL = 5 * time.Minute
 
 // New returns a Server serving storeDir.
 func New(storeDir string) *Server {
 	return &Server{
 		Store:    inventory.New(storeDir),
 		DumpFunc: NARStoreDump,
+		DumpTTL:  defaultDumpTTL,
 		dumps:    map[string]*dumpCall{},
 		Log:      log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
 	}
@@ -147,7 +159,13 @@ func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req MissingReq
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -206,14 +224,14 @@ func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(p, ".narinfo"):
 		hash := strings.TrimSuffix(p, ".narinfo")
-		if hash == "" || strings.Contains(hash, "/") {
+		if !validStoreHash(hash) {
 			http.NotFound(w, r)
 			return
 		}
 		s.serveNarinfo(w, r, hash)
-	case strings.HasPrefix(p, "nar/"):
+	case strings.HasPrefix(p, "nar/") && strings.HasSuffix(p, ".nar"):
 		hash := strings.TrimSuffix(strings.TrimPrefix(p, "nar/"), ".nar")
-		if hash == "" || strings.Contains(hash, "/") {
+		if !validStoreHash(hash) {
 			http.NotFound(w, r)
 			return
 		}
@@ -221,6 +239,14 @@ func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// validStoreHash accepts only a full 32-character store hash. LookupHash
+// matches exactly, so a short probe like /a.narinfo can never prefix-match
+// a store path, enumerate the store, or trigger a dump; this check only
+// keeps malformed URLs out of the dump path early.
+func validStoreHash(s string) bool {
+	return len(s) == 32
 }
 
 func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash string) {
@@ -279,12 +305,14 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 // dropped from the cache so the next request dumps again.
 func (s *Server) dumpCoalesced(path string) (dumpResult, error) {
 	s.mu.Lock()
+	s.evictLocked(time.Now())
 	if c, ok := s.dumps[path]; ok {
+		c.used = time.Now()
 		s.mu.Unlock()
 		<-c.done
 		return c.res, c.err
 	}
-	c := &dumpCall{done: make(chan struct{})}
+	c := &dumpCall{done: make(chan struct{}), used: time.Now()}
 	s.dumps[path] = c
 	s.mu.Unlock()
 
@@ -297,6 +325,30 @@ func (s *Server) dumpCoalesced(path string) (dumpResult, error) {
 		s.mu.Unlock()
 	}
 	return res, err
+}
+
+// evictLocked unlinks finished dumps that no caller has used within
+// DumpTTL, bounding both the map and the temp files on disk. In-flight
+// dumps are left alone. Callers must hold s.mu.
+func (s *Server) evictLocked(now time.Time) {
+	ttl := s.DumpTTL
+	if ttl <= 0 {
+		ttl = defaultDumpTTL
+	}
+	for path, c := range s.dumps {
+		select {
+		case <-c.done:
+		default:
+			continue // dump still running
+		}
+		if now.Sub(c.used) < ttl {
+			continue
+		}
+		delete(s.dumps, path)
+		if c.res.file != "" {
+			_ = os.Remove(c.res.file)
+		}
+	}
 }
 
 // dumpOnce dumps path to a temp file and hashes the result. The temp file is
