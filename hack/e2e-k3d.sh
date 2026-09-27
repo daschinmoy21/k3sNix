@@ -6,7 +6,7 @@
 #   pod gets a fresh emptyDir at /data/store, so the fixture closure is
 #   seeded into it at startup, by node name (-seed-by-node -seed-label=e2e):
 #     * node name ending in server-0 (or containing "warm") -> warm: every path
-#     * node name containing agent-0 (or "mid")             -> mid: first half
+#     * node name ending in agent-0 (or containing "mid")    -> mid: first half
 #     * anything else                                       -> cold: no paths
 #   The /nix/store volume (--volume /nix/store:/nix/store@all) exists so the
 #   origin pod can serve the store paths that `nix build .#closures` already
@@ -163,7 +163,9 @@ probe() {
 }
 
 pod_role() {
-  kubectl -n k3snix logs "$1" | grep -o 'role=[a-z]*' | head -n 1 | cut -d= -f2
+  local out
+  out=$(kubectl -n k3snix logs "$1" 2>/dev/null | grep -o 'role=[a-z]*' | head -n 1) || true
+  echo "${out#role=}"
 }
 
 pod_with_role() {
@@ -213,7 +215,8 @@ for pod in $pods; do
   node=$(kubectl -n k3snix get pod "$pod" -o jsonpath='{.spec.nodeName}')
   role=$(pod_role "$pod")
   [ -n "$role" ] || fail "$pod ($node): no seed role in logs"
-  resp=$(probe "$pod" http://127.0.0.1:9860/v1/missing_bytes '{"label":"e2e"}')
+  resp=$(probe "$pod" http://127.0.0.1:9860/v1/missing_bytes '{"label":"e2e"}') \
+    || fail "$pod ($node): missing_bytes probe failed"
   bytes=$(jq -r '.bytes' <<<"$resp")
   case "$role" in
     warm) want=0 ;;
@@ -241,12 +244,14 @@ mid_pod=$(pod_with_role mid)
 warm_ip=$(kubectl -n k3snix get pod "$warm_pod" -o jsonpath='{.status.podIP}')
 [ -n "$warm_ip" ] || fail "no pod IP for $warm_pod"
 
-narinfo=$(probe "$mid_pod" "http://${warm_ip}:9860/${PEER_HASH}.narinfo")
+narinfo=$(probe "$mid_pod" "http://${warm_ip}:9860/${PEER_HASH}.narinfo") \
+  || fail "narinfo probe failed for warm pod $warm_pod"
 [ -n "$narinfo" ] || fail "empty narinfo for ${PEER_HASH}"
 narurl=$(awk '/^URL: /{print $2}' <<<"$narinfo")
 [ -n "$narurl" ] || fail "narinfo has no URL field: $narinfo"
 
-probe "$mid_pod" "http://${warm_ip}:9860/${narurl}" >"$tmp/peer.nar"
+probe "$mid_pod" "http://${warm_ip}:9860/${narurl}" >"$tmp/peer.nar" \
+  || fail "NAR fetch failed from $warm_pod"
 actual_size=$(wc -c <"$tmp/peer.nar" | tr -d ' ')
 actual_hash=$(sha256sum "$tmp/peer.nar" | cut -d' ' -f1)
 want_hash=$(awk '/^NarHash: /{print $2}' <<<"$narinfo")

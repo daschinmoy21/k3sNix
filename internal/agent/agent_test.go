@@ -578,6 +578,35 @@ func TestDumpEvictionRemovesTempFile(t *testing.T) {
 	}
 }
 
+func TestOriginProbeUpstreamError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream broken", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	s := newServer(t, t.TempDir())
+	s.Origin = upstream.URL
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/origin_probe", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status %d against a 500 origin, want 502", resp.StatusCode)
+	}
+
+	s.mu.Lock()
+	reqs, obytes := s.originRequests, s.originBytes
+	s.mu.Unlock()
+	if reqs != 0 || obytes != 0 {
+		t.Fatalf("counters moved on a failed probe: requests=%d bytes=%d", reqs, obytes)
+	}
+}
+
 func parseNarinfo(t *testing.T, body []byte) map[string]string {
 	t.Helper()
 	fields := map[string]string{}

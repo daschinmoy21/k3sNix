@@ -22,13 +22,13 @@ const (
 // RoleForNode classifies a node name for seeding:
 //
 //   - contains "warm" or ends with "server-0" -> warm (every path)
-//   - contains "mid" or contains "agent-0"    -> mid (first half)
+//   - contains "mid" or ends with "-agent-0"  -> mid (first half)
 //   - anything else                           -> cold (no paths)
 func RoleForNode(node string) string {
 	switch {
 	case strings.Contains(node, "warm") || strings.HasSuffix(node, "server-0"):
 		return RoleWarm
-	case strings.Contains(node, "mid") || strings.Contains(node, "agent-0"):
+	case strings.Contains(node, "mid") || strings.HasSuffix(node, "-agent-0"):
 		return RoleMid
 	default:
 		return RoleCold

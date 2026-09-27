@@ -12,6 +12,10 @@ import (
 	"k3snix/internal/agent"
 )
 
+// probeTimeout bounds the one-shot client so a wedged peer fails the e2e
+// smoke instead of hanging the kubectl exec forever.
+const probeTimeout = 30 * time.Second
+
 func main() {
 	var (
 		listen     = flag.String("listen", ":9860", "http listen address")
@@ -91,11 +95,15 @@ func probe(url, body string) {
 		req, err = http.NewRequest(http.MethodGet, url, nil)
 	} else {
 		req, err = http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 	}
 	if err != nil {
 		log.Fatalf("probe %s: %v", url, err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: probeTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatalf("probe %s: %v", url, err)
 	}
