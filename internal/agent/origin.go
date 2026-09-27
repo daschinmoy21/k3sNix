@@ -18,9 +18,9 @@ const originMaxBody = 1 << 20
 
 // handleOriginProbe performs one GET of {origin}/nix-cache-info and records
 // it in k3snix_origin_requests / k3snix_origin_bytes. Without -origin the
-// endpoint answers 400 and never touches the counters. A non-2xx upstream
-// answers 502 and never touches the counters either: only a genuinely
-// healthy origin moves them.
+// endpoint answers 400 and never touches the counters. An upstream status
+// other than 200 answers 502 and never touches the counters either: only a
+// genuinely healthy origin moves them.
 func (s *Server) handleOriginProbe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -39,13 +39,15 @@ func (s *Server) handleOriginProbe(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
+		// Drain at most originMaxBody so a small error body can reuse the
+		// connection; anything longer is cut off by Close.
+		io.Copy(io.Discard, io.LimitReader(resp.Body, originMaxBody))
 		http.Error(w, fmt.Sprintf("origin probe: unexpected status %d", resp.StatusCode),
 			http.StatusBadGateway)
 		return
 	}
-	// Read one byte past the cap: plain LimitReader would silently truncate
-	// and cache a half-body as if it were valid.
+	// Read one byte past the cap: a plain LimitReader would silently
+	// truncate, and the probe would count and relay a half-body as valid.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, originMaxBody+1))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("origin probe: %v", err), http.StatusBadGateway)
