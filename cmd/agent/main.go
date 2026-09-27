@@ -22,6 +22,8 @@ func main() {
 		store      = flag.String("store", "/nix/store", "nix store directory")
 		catalog    = flag.String("catalog", "", "directory of closure JSON files")
 		ttl        = flag.Duration("ttl", 2*time.Second, "store listing TTL")
+		dumpTTL    = flag.Duration("dump-ttl", 5*time.Minute, "how long an idle NAR dump stays cached")
+		dumpBytes  = flag.Int64("dump-cache-bytes", 2<<30, "cap on the total size of cached NAR dumps")
 		origin     = flag.String("origin", "", "upstream origin cache base URL for /v1/origin_probe")
 		seedByNode = flag.Bool("seed-by-node", false, "seed the store from the label closure according to NODE_NAME")
 		seedLabel  = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
@@ -37,6 +39,8 @@ func main() {
 
 	s := agent.New(*store)
 	s.Store.TTL = *ttl
+	s.DumpTTL = *dumpTTL
+	s.MaxDumpBytes = *dumpBytes
 	s.Origin = *origin
 	if *catalog != "" {
 		if err := s.LoadCatalog(*catalog); err != nil {

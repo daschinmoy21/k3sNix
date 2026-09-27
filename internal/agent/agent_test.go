@@ -553,10 +553,11 @@ func TestDumpEvictionRemovesTempFile(t *testing.T) {
 		return err
 	}
 
-	res, err := s.dumpCoalesced(a)
+	res, release, err := s.dumpCoalesced(a)
 	if err != nil {
 		t.Fatal(err)
 	}
+	release()
 	if _, err := os.Stat(res.file); err != nil {
 		t.Fatalf("temp file missing after dump: %v", err)
 	}
@@ -564,9 +565,11 @@ func TestDumpEvictionRemovesTempFile(t *testing.T) {
 	time.Sleep(30 * time.Millisecond) // outlive DumpTTL
 
 	// The next dump request sweeps the idle entry and unlinks its file.
-	if _, err := s.dumpCoalesced(b); err != nil {
+	_, release, err = s.dumpCoalesced(b)
+	if err != nil {
 		t.Fatal(err)
 	}
+	release()
 	if _, err := os.Stat(res.file); !os.IsNotExist(err) {
 		t.Fatalf("evicted temp file still on disk (stat err: %v)", err)
 	}
