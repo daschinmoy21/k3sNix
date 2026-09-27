@@ -46,6 +46,12 @@ type Server struct {
 	// contacts the origin.
 	Origin string
 
+	// MaxRequestBytes caps a /v1/missing_bytes request body; larger bodies get
+	// 413. A paths list costs roughly 500 bytes per store path, so the
+	// default fits closures of about 30,000 paths. Zero means
+	// defaultMaxRequestBytes.
+	MaxRequestBytes int64
+
 	// closures mirrors the catalog contents so narinfo can find references
 	// for a store path without enumerating the Catalog's private indexes.
 	closures []closure.Closure
@@ -147,6 +153,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "k3snix_origin_bytes %d\n", originBytes)
 }
 
+// defaultMaxRequestBytes applies when Server.MaxRequestBytes is unset.
+const defaultMaxRequestBytes = 16 << 20
+
 type MissingReq struct {
 	ID    string         `json:"id"`
 	Label string         `json:"label"`
@@ -171,7 +180,11 @@ func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req MissingReq
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	limit := s.MaxRequestBytes
+	if limit <= 0 {
+		limit = defaultMaxRequestBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {

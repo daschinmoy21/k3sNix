@@ -528,7 +528,7 @@ func TestRequestBodyTooLarge(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	body := `{"label":"` + strings.Repeat("x", 2<<20) + `"}`
+	body := `{"label":"` + strings.Repeat("x", defaultMaxRequestBytes) + `"}`
 	resp, err := http.Post(srv.URL+"/v1/missing_bytes", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
