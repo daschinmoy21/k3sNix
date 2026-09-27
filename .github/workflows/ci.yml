@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # go tests, the k3snix package and the closure manifests, as pinned by
+  # the flake.
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - run: nix flake check -L
+
+  # gofmt, vet and the race detector, which the sandboxed goTests check
+  # cannot run (it builds with CGO_ENABLED=0). Go comes from the flake's
+  # nixpkgs pin without pulling the whole dev shell.
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: gofmt
+        run: |
+          unformatted=$(nix shell --inputs-from . nixpkgs#go -c gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        run: nix shell --inputs-from . nixpkgs#go nixpkgs#gcc -c go vet ./...
+      - name: go test -race
+        run: nix shell --inputs-from . nixpkgs#go nixpkgs#gcc -c go test -race -count=1 ./...
