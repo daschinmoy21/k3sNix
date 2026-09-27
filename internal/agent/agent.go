@@ -40,14 +40,22 @@ type Server struct {
 	// defaultDumpTTL.
 	DumpTTL time.Duration
 
+	// Origin is the base URL of the upstream cache that /v1/origin_probe
+	// measures. Empty disables probing: the endpoint answers 400 and the
+	// origin counters stay untouched. Nothing else on this server ever
+	// contacts the origin.
+	Origin string
+
 	// closures mirrors the catalog contents so narinfo can find references
 	// for a store path without enumerating the Catalog's private indexes.
 	closures []closure.Closure
 
-	mu          sync.Mutex
-	dumps       map[string]*dumpCall
-	narServed   int64
-	bytesServed int64
+	mu             sync.Mutex
+	dumps          map[string]*dumpCall
+	narServed      int64
+	bytesServed    int64
+	originRequests int64
+	originBytes    int64
 }
 
 // dumpResult is a finished NAR dump kept on disk so waiters can copy the
@@ -115,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/v1/missing_bytes", s.handleMissing)
+	mux.HandleFunc("/v1/origin_probe", s.handleOriginProbe)
 	mux.HandleFunc("/nix-cache-info", s.handleCacheInfo)
 	mux.HandleFunc("/", s.handleCache)
 	return mux
@@ -128,11 +137,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	narServed, bytesServed := s.narServed, s.bytesServed
+	originRequests, originBytes := s.originRequests, s.originBytes
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, "k3snix_nar_served %d\n", narServed)
 	fmt.Fprintf(w, "k3snix_nar_bytes_served %d\n", bytesServed)
 	fmt.Fprintf(w, "k3snix_store_paths %d\n", s.Store.Count())
+	fmt.Fprintf(w, "k3snix_origin_requests %d\n", originRequests)
+	fmt.Fprintf(w, "k3snix_origin_bytes %d\n", originBytes)
 }
 
 type MissingReq struct {
@@ -352,8 +364,14 @@ func (s *Server) evictLocked(now time.Time) {
 }
 
 // dumpOnce dumps path to a temp file and hashes the result. The temp file is
-// removed when the dump fails, so a partial NAR is never served.
+// removed when the dump fails, so a partial NAR is never served. Minimal
+// images (dockerTools.buildLayeredImage) ship no /tmp, so it is created
+// before use.
 func (s *Server) dumpOnce(path string) (dumpResult, error) {
+	// 0700 is deliberate: single-process container, no shared /tmp.
+	if err := os.MkdirAll(os.TempDir(), 0o700); err != nil {
+		return dumpResult{}, err
+	}
 	tmp, err := os.CreateTemp("", "k3snix-nar-")
 	if err != nil {
 		return dumpResult{}, err
