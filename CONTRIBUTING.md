@@ -25,7 +25,8 @@ Before opening a PR, make sure these pass:
 ```sh
 go test ./...
 nix build .#k3snix
+nix flake check
 ```
 
-If you touched the NixOS module or closures, rebuild the flake outputs as
-well.
+If you touched the NixOS module or closures, rebuild the flake outputs and also run
+`nix build .#closures`.

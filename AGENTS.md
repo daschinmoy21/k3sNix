@@ -18,6 +18,8 @@ Guidance for AI coding agents working in this repository.
 - `cmd/agent` — per-node DaemonSet (store-path inventory, binary cache)
 - `cmd/extender` — kube-scheduler extender (scores nodes by missing NAR bytes)
 - `cmd/bench` — placement and fetch model
+- `internal/` - NAR writer, base32, store inventory, closure graph, agent HTTP
 - `nix/` — NixOS module and closure builders
 - `deploy/` — Kubernetes manifests
 - `hack/` — development and e2e scripts
+- `docs/` - phase plan and roadmap
