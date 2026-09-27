@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,11 +35,17 @@ type Server struct {
 	Log      *log.Logger
 	DumpFunc DumpFunc
 
-	// DumpTTL bounds how long a finished dump is reused. When it expires
-	// the entry and its temp file are evicted on the next dump request, so
-	// the temp directory cannot grow without bound. Zero means
-	// defaultDumpTTL.
+	// DumpTTL bounds how long an idle finished dump is reused. Expired
+	// entries and their temp files are evicted on the next dump request or
+	// release. Zero means defaultDumpTTL.
 	DumpTTL time.Duration
+
+	// MaxDumpBytes caps the total size of cached dump files. Once a dump
+	// pushes the total over it, idle entries are evicted least recently
+	// used first. Entries a caller still holds are never evicted, so the
+	// total can exceed the cap while they are in use. Zero means
+	// defaultMaxDumpBytes.
+	MaxDumpBytes int64
 
 	// Origin is the base URL of the upstream cache that /v1/origin_probe
 	// measures. Empty disables probing: the endpoint answers 400 and the
@@ -52,6 +59,7 @@ type Server struct {
 
 	mu             sync.Mutex
 	dumps          map[string]*dumpCall
+	dumpBytes      int64 // total size of the finished dumps in dumps
 	narServed      int64
 	bytesServed    int64
 	originRequests int64
@@ -70,20 +78,26 @@ type dumpCall struct {
 	done chan struct{}
 	res  dumpResult
 	err  error
-	used time.Time // last time a caller was handed this result
+	refs int       // callers holding res; a held entry is never evicted
+	used time.Time // when the last caller released res
 }
 
-// defaultDumpTTL applies when Server.DumpTTL is unset.
-const defaultDumpTTL = 5 * time.Minute
+const (
+	// defaultDumpTTL applies when Server.DumpTTL is unset.
+	defaultDumpTTL = 5 * time.Minute
+	// defaultMaxDumpBytes applies when Server.MaxDumpBytes is unset.
+	defaultMaxDumpBytes = 2 << 30
+)
 
 // New returns a Server serving storeDir.
 func New(storeDir string) *Server {
 	return &Server{
-		Store:    inventory.New(storeDir),
-		DumpFunc: NARStoreDump,
-		DumpTTL:  defaultDumpTTL,
-		dumps:    map[string]*dumpCall{},
-		Log:      log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
+		Store:        inventory.New(storeDir),
+		DumpFunc:     NARStoreDump,
+		DumpTTL:      defaultDumpTTL,
+		MaxDumpBytes: defaultMaxDumpBytes,
+		dumps:        map[string]*dumpCall{},
+		Log:          log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
 	}
 }
 
@@ -267,7 +281,8 @@ func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash strin
 		http.NotFound(w, r)
 		return
 	}
-	res, err := s.dumpCoalesced(path)
+	res, release, err := s.dumpCoalesced(path)
+	defer release()
 	if err != nil {
 		s.logError("narinfo", path, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -290,7 +305,8 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 		http.NotFound(w, r)
 		return
 	}
-	res, err := s.dumpCoalesced(path)
+	res, release, err := s.dumpCoalesced(path)
+	defer release()
 	if err != nil {
 		s.logError("nar", path, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -312,54 +328,99 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 	s.mu.Unlock()
 }
 
-// dumpCoalesced returns a finished dump for path. Overlapping requests call
-// DumpFunc once; waiters copy the file the leader produced. A failed dump is
-// dropped from the cache so the next request dumps again.
-func (s *Server) dumpCoalesced(path string) (dumpResult, error) {
+// dumpCoalesced returns a finished dump for path and a release func that the
+// caller must call once it no longer needs res.file, error or not.
+// Overlapping requests call DumpFunc once; waiters copy the file the leader
+// produced. An entry is never evicted while a caller holds it, however long
+// the dump took. A failed dump is dropped from the cache so the next request
+// dumps again.
+func (s *Server) dumpCoalesced(path string) (dumpResult, func(), error) {
 	s.mu.Lock()
 	s.evictLocked(time.Now())
-	if c, ok := s.dumps[path]; ok {
-		c.used = time.Now()
-		s.mu.Unlock()
-		<-c.done
-		return c.res, c.err
+	c, ok := s.dumps[path]
+	if !ok {
+		c = &dumpCall{done: make(chan struct{})}
+		s.dumps[path] = c
 	}
-	c := &dumpCall{done: make(chan struct{}), used: time.Now()}
-	s.dumps[path] = c
+	c.refs++
 	s.mu.Unlock()
+	release := func() { s.release(c) }
+
+	if ok {
+		<-c.done
+		return c.res, release, c.err
+	}
 
 	res, err := s.dumpOnce(path)
 	c.res, c.err = res, err
-	close(c.done)
+	s.mu.Lock()
 	if err != nil {
-		s.mu.Lock()
 		delete(s.dumps, path)
-		s.mu.Unlock()
+	} else {
+		s.dumpBytes += res.size
 	}
-	return res, err
+	s.mu.Unlock()
+	close(c.done)
+	return res, release, err
 }
 
-// evictLocked unlinks finished dumps that no caller has used within
-// DumpTTL, bounding both the map and the temp files on disk. In-flight
-// dumps are left alone. Callers must hold s.mu.
+// release drops one caller's hold on c and sweeps the cache, so a dump that
+// pushed the total over MaxDumpBytes is trimmed as soon as it goes idle.
+func (s *Server) release(c *dumpCall) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c.refs--
+	c.used = time.Now()
+	s.evictLocked(c.used)
+}
+
+// evictLocked unlinks idle dumps: first those unused for DumpTTL, then,
+// least recently used first, as many as it takes to bring the total under
+// MaxDumpBytes. Held entries are skipped; the leader holds its entry until
+// after the dump finishes, so running dumps are skipped too. Callers must
+// hold s.mu.
 func (s *Server) evictLocked(now time.Time) {
 	ttl := s.DumpTTL
 	if ttl <= 0 {
 		ttl = defaultDumpTTL
 	}
+	limit := s.MaxDumpBytes
+	if limit <= 0 {
+		limit = defaultMaxDumpBytes
+	}
+
+	var idle []string
 	for path, c := range s.dumps {
-		select {
-		case <-c.done:
-		default:
-			continue // dump still running
-		}
-		if now.Sub(c.used) < ttl {
+		if c.refs > 0 {
 			continue
 		}
-		delete(s.dumps, path)
-		if c.res.file != "" {
-			_ = os.Remove(c.res.file)
+		if now.Sub(c.used) >= ttl {
+			s.dropLocked(path, c)
+			continue
 		}
+		idle = append(idle, path)
+	}
+	if s.dumpBytes <= limit {
+		return
+	}
+	sort.Slice(idle, func(i, j int) bool {
+		return s.dumps[idle[i]].used.Before(s.dumps[idle[j]].used)
+	})
+	for _, path := range idle {
+		if s.dumpBytes <= limit {
+			return
+		}
+		s.dropLocked(path, s.dumps[path])
+	}
+}
+
+// dropLocked removes a finished dump from the cache and unlinks its file.
+// Callers must hold s.mu.
+func (s *Server) dropLocked(path string, c *dumpCall) {
+	delete(s.dumps, path)
+	s.dumpBytes -= c.res.size
+	if c.res.file != "" {
+		_ = os.Remove(c.res.file)
 	}
 }
 
