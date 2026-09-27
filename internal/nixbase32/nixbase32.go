@@ -5,9 +5,6 @@ import "strings"
 
 const alphabet = "0123456789abcdfghijklmnpqrsvwxyz"
 
-// EncodeToString encodes src with Nix's base32 alphabet. Five-bit groups are
-// read from the low end of src and the characters are emitted highest group
-// first. The output length is ceil(len(src)*8/5); empty input encodes to "".
 // IsValid reports whether every byte of s is in Nix's base32 alphabet. The
 // empty string is valid.
 func IsValid(s string) bool {
@@ -19,6 +16,9 @@ func IsValid(s string) bool {
 	return true
 }
 
+// EncodeToString encodes src with Nix's base32 alphabet. Five-bit groups are
+// read from the low end of src and the characters are emitted highest group
+// first. The output length is ceil(len(src)*8/5); empty input encodes to "".
 func EncodeToString(src []byte) string {
 	if len(src) == 0 {
 		return ""
