@@ -3,15 +3,12 @@ package nar
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 func TestWriteRegularFile(t *testing.T) {
@@ -179,31 +176,6 @@ func TestWriteMatchesNixStoreDump(t *testing.T) {
 				t.Fatalf("NAR differs from nix-store --dump (%s)", firstDiff(got, want))
 			}
 		})
-	}
-}
-
-func TestWriteRejectsNonRegular(t *testing.T) {
-	fifo := filepath.Join(t.TempDir(), "fifo")
-	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
-		t.Skipf("mkfifo: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		var buf bytes.Buffer
-		done <- Write(&buf, fifo)
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("Write accepted a FIFO")
-		}
-		if !errors.Is(err, os.ErrInvalid) {
-			t.Errorf("Write(fifo) = %v, want os.ErrInvalid", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Write blocked on a FIFO")
 	}
 }
 

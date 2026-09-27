@@ -108,10 +108,19 @@ func writeRegular(w io.Writer, path string, info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		return &os.PathError{Op: "Write", Path: path, Err: os.ErrInvalid}
 	}
+	// The header is written from the opened fd's stat, not the earlier
+	// Lstat, so the executable flag and size describe the bytes written.
+	f, fi, err := openRegular(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
 	if err := writeString(w, "regular"); err != nil {
 		return err
 	}
-	if info.Mode()&0o111 != 0 {
+	// Nix records only the owner execute bit (S_IXUSR).
+	if fi.Mode()&0o100 != 0 {
 		if err := writeString(w, "executable"); err != nil {
 			return err
 		}
@@ -121,19 +130,6 @@ func writeRegular(w io.Writer, path string, info os.FileInfo) error {
 	}
 	if err := writeString(w, "contents"); err != nil {
 		return err
-	}
-
-	f, err := openNoFollow(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if !fi.Mode().IsRegular() {
-		return &os.PathError{Op: "Write", Path: path, Err: os.ErrInvalid}
 	}
 	return writeContents(w, f, fi.Size())
 }
