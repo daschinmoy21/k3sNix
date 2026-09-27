@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeOrigin records every request it serves and answers /nix-cache-info
@@ -174,5 +175,48 @@ func TestOriginProbeUnconfigured(t *testing.T) {
 	get.Body.Close()
 	if get.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("GET probe status %d, want 405", get.StatusCode)
+	}
+}
+
+func TestOriginProbeErrorBodyIsBounded(t *testing.T) {
+	// An origin that answers 503 with an endless body must not hold the
+	// probe until the client timeout: the drain stops at originMaxBody.
+	stop := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		chunk := make([]byte, 32<<10)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-r.Context().Done():
+				return
+			default:
+			}
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	defer upstream.Close()
+	defer close(stop)
+
+	s := newServer(t, t.TempDir())
+	s.Origin = upstream.URL
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	start := time.Now()
+	resp, err := http.Post(srv.URL+"/v1/origin_probe", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status %d against a 503 origin, want 502", resp.StatusCode)
+	}
+	if elapsed := time.Since(start); elapsed > originClientTimeout/2 {
+		t.Fatalf("probe took %v draining an endless error body", elapsed)
 	}
 }

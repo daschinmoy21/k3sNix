@@ -6,7 +6,7 @@
 #   pod gets a fresh emptyDir at /data/store, so the fixture closure is
 #   seeded into it at startup, by node name (-seed-by-node -seed-label=e2e):
 #     * node name ending in server-0 (or containing "warm") -> warm: every path
-#     * node name ending in agent-0 (or containing "mid")    -> mid: first half
+#     * node name ending in -agent-0 (or containing "mid")   -> mid: first half
 #     * anything else                                       -> cold: no paths
 #   The /nix/store volume (--volume /nix/store:/nix/store@all) exists so the
 #   origin pod can serve the store paths that `nix build .#closures` already
