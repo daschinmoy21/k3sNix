@@ -29,6 +29,7 @@ func main() {
 		seedLabel  = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
 		probeURL   = flag.String("probe-url", "", "one-shot client: GET this URL (POST with -probe-body), print the response body, exit")
 		probeBody  = flag.String("probe-body", "", "request body for -probe-url; empty body sends GET")
+		maxReqBody = flag.Int64("max-request-bytes", 16<<20, "cap on a /v1/missing_bytes request body")
 	)
 	flag.Parse()
 
@@ -57,6 +58,7 @@ func main() {
 		log.Printf("store %s: %d paths", s.Store.Dir, s.Store.Count())
 	}
 
+	s.MaxRequestBytes = *maxReqBody
 	srv := &http.Server{
 		Addr:              *listen,
 		Handler:           s.Handler(),
