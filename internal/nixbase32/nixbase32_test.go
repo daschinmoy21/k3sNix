@@ -39,3 +39,17 @@ func TestEncodeToStringEmpty(t *testing.T) {
 		t.Errorf("EncodeToString([]byte{}) = %q, want empty", got)
 	}
 }
+
+func TestIsValid(t *testing.T) {
+	for _, s := range []string{"", alphabet, "0123456789abcdfghijklmnpqrsvwxyz"} {
+		if !IsValid(s) {
+			t.Errorf("IsValid(%q) = false, want true", s)
+		}
+	}
+	// e, o, t and u are left out of the alphabet; case matters.
+	for _, s := range []string{"e", "o", "t", "u", "A", "-", "/", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae"} {
+		if IsValid(s) {
+			t.Errorf("IsValid(%q) = true, want false", s)
+		}
+	}
+}

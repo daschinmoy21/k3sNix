@@ -253,12 +253,13 @@ func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validStoreHash accepts only a full 32-character store hash. LookupHash
-// matches exactly, so a short probe like /a.narinfo can never prefix-match
-// a store path, enumerate the store, or trigger a dump; this check only
-// keeps malformed URLs out of the dump path early.
+// validStoreHash accepts only a full 32-character store hash in the nix
+// base32 alphabet. LookupHash matches exactly, so a short probe like
+// /a.narinfo can never prefix-match a store path, enumerate the store, or
+// trigger a dump; this check keeps malformed URLs away from the lookup and
+// the dump path altogether.
 func validStoreHash(s string) bool {
-	return len(s) == 32
+	return len(s) == 32 && nixbase32.IsValid(s)
 }
 
 func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash string) {

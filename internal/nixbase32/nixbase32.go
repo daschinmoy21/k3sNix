@@ -1,11 +1,24 @@
 // Package nixbase32 encodes hashes in the base32 alphabet Nix uses.
 package nixbase32
 
+import "strings"
+
 const alphabet = "0123456789abcdfghijklmnpqrsvwxyz"
 
 // EncodeToString encodes src with Nix's base32 alphabet. Five-bit groups are
 // read from the low end of src and the characters are emitted highest group
 // first. The output length is ceil(len(src)*8/5); empty input encodes to "".
+// IsValid reports whether every byte of s is in Nix's base32 alphabet. The
+// empty string is valid.
+func IsValid(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if strings.IndexByte(alphabet, s[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func EncodeToString(src []byte) string {
 	if len(src) == 0 {
 		return ""

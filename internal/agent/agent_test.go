@@ -260,7 +260,7 @@ func TestCoalescedDump(t *testing.T) {
 
 func TestDumpFailureRetries(t *testing.T) {
 	dir := t.TempDir()
-	mustDir(t, filepath.Join(dir, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-pkg"))
+	mustDir(t, filepath.Join(dir, "gggggggggggggggggggggggggggggggg-pkg"))
 	s := newServer(t, dir)
 
 	body := []byte("good-nar-payload")
@@ -278,7 +278,7 @@ func TestDumpFailureRetries(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/nar/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.nar")
+	resp, err := http.Get(srv.URL + "/nar/gggggggggggggggggggggggggggggggg.nar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestDumpFailureRetries(t *testing.T) {
 	}
 
 	fail.Store(false)
-	resp2, err := http.Get(srv.URL + "/nar/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.nar")
+	resp2, err := http.Get(srv.URL + "/nar/gggggggggggggggggggggggggggggggg.nar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +488,17 @@ func TestCacheInfoHealthMetrics(t *testing.T) {
 func TestStrictCacheRouting(t *testing.T) {
 	dir := t.TempDir()
 	mustDir(t, filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg"))
+	// Entries whose hash is outside the nix base32 alphabet exist on disk,
+	// so only validStoreHash can turn their requests into 404s.
+	mustDir(t, filepath.Join(dir, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-pkg"))
+	mustDir(t, filepath.Join(dir, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-pkg"))
 	s := newServer(t, dir)
+	var dumps atomic.Int32
+	s.DumpFunc = func(path string, w io.Writer) error {
+		dumps.Add(1)
+		_, err := w.Write([]byte("payload"))
+		return err
+	}
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
@@ -499,8 +509,10 @@ func TestStrictCacheRouting(t *testing.T) {
 		"/aaaaaaaa.narinfo", // 8-char prefix probe
 		"/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo", // 36 chars
 		"/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.narinfo",     // 'e' is not in nix base32
-		"/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",         // missing .nar suffix
-		"/nar/a.nar",                                    // short hash
+		"/nar/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.nar",
+		"/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.narinfo", // nix base32 is lower case
+		"/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",     // missing .nar suffix
+		"/nar/a.nar",                                // short hash
 	} {
 		resp, err := http.Get(srv.URL + path)
 		if err != nil {
@@ -510,6 +522,9 @@ func TestStrictCacheRouting(t *testing.T) {
 		if resp.StatusCode != 404 {
 			t.Fatalf("%s status %d, want 404", path, resp.StatusCode)
 		}
+	}
+	if n := dumps.Load(); n != 0 {
+		t.Fatalf("rejected requests triggered %d dumps", n)
 	}
 
 	// The canonical request still works.
