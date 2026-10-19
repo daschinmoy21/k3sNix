@@ -102,8 +102,8 @@ func TestMissingBytesHTTP(t *testing.T) {
 	if _, ok := out["have"]; ok {
 		t.Fatalf("response must not include the have-set: %v", out)
 	}
-	if _, ok := out["estimate_ms"]; !ok {
-		t.Fatalf("response must include estimate_ms: %v", out)
+	if _, ok := out["compute_ms"]; !ok {
+		t.Fatalf("response must include compute_ms: %v", out)
 	}
 
 	if respBytes, ok := out["have_bytes"]; !ok || string(respBytes) != "10" {
