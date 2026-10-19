@@ -120,6 +120,24 @@ pkgs.runCommand "closure-manifests"
       def versionOf($f; $prefix):
         [$f.paths[].path | storeName | select(startswith($prefix)) | ltrimstr($prefix)]
         | first // "";
+      # Bytes a node holding $a must fetch to hold $b: the narSize of every
+      # path in $b that $a lacks. It exceeds the closure-size delta because
+      # the root path changes on every version too.
+      def transfer($a; $b):
+        ([$a.paths[].path]) as $have
+        | [$b.paths[] | select(.path as $p | $have | index([$p]) | not) | .narSize]
+        | add // 0;
+      def step($from; $to; $a; $b; $prev; $next):
+        transfer($a; $b) as $t
+        | {
+            from: $from,
+            to: $to,
+            delta: ($next - $prev),
+            prevBytes: $prev,
+            ratioPct: (($next - $prev) / $prev * 10000 | round / 100),
+            transferBytes: $t,
+            transferPct: ($t / $next * 10000 | round / 100)
+          };
       def intersect($a; $b):
         ([$a.paths[].path] | sort) as $ap
         | ([$b.paths[].path] | sort) as $bp
@@ -142,29 +160,20 @@ pkgs.runCommand "closure-manifests"
       | {
           nixpkgsRev: $rev,
           labels: $labels,
+          # delta and ratioPct compare closure sizes (the 1-5% ladder the
+          # build checks); transferBytes and transferPct are what a node on
+          # the previous version actually fetches, as a share of the new
+          # closure. fromV1 does the same from a node holding only churn-v1.
           churn: {
             steps: [
-              {
-                from: "churn-v1",
-                to: "churn-v2",
-                delta: ($b2 - $b1),
-                prevBytes: $b1,
-                ratioPct: (($b2 - $b1) / $b1 * 10000 | round / 100)
-              },
-              {
-                from: "churn-v2",
-                to: "churn-v3",
-                delta: ($b3 - $b2),
-                prevBytes: $b2,
-                ratioPct: (($b3 - $b2) / $b2 * 10000 | round / 100)
-              },
-              {
-                from: "churn-v3",
-                to: "churn-v4",
-                delta: ($b4 - $b3),
-                prevBytes: $b3,
-                ratioPct: (($b4 - $b3) / $b3 * 10000 | round / 100)
-              }
+              step("churn-v1"; "churn-v2"; $m1[0]; $m2[0]; $b1; $b2),
+              step("churn-v2"; "churn-v3"; $m2[0]; $m3[0]; $b2; $b3),
+              step("churn-v3"; "churn-v4"; $m3[0]; $m4[0]; $b3; $b4)
+            ],
+            fromV1: [
+              step("churn-v1"; "churn-v2"; $m1[0]; $m2[0]; $b1; $b2),
+              step("churn-v1"; "churn-v3"; $m1[0]; $m3[0]; $b1; $b3),
+              step("churn-v1"; "churn-v4"; $m1[0]; $m4[0]; $b1; $b4)
             ]
           },
           sharing: {
