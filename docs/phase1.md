@@ -38,28 +38,98 @@ Out of scope (guard rails against creep):
 
 ## Acceptance criteria
 
-- [ ] `nix flake lock` pins nixpkgs and every workload input; versions are recorded
-- [ ] Each closure emits a manifest from `nix path-info --json`: path, narSize,
+- [x] `nix flake lock` pins nixpkgs and every workload input; versions are recorded
+- [x] Each closure emits a manifest from `nix path-info --json`: path, narSize,
       narHash, references
-- [ ] Closure IDs are fingerprints over the path list plus sizes, never taken
+- [x] Closure IDs are fingerprints over the path list plus sizes, never taken
       from a pod annotation
-- [ ] The catalog maps closure-id to manifest, and Go code parses both nix
+- [x] The catalog maps closure-id to manifest, and Go code parses both nix
       native JSON and the project format
-- [ ] The three workload families exist with measured deltas: the churn ladder
+- [x] The three workload families exist with measured deltas: the churn ladder
       v1 to v4 (1 to 5 percent byte steps, verified with `nix path-info -rS`),
       a glibc-sharing pair, and an unrelated pair as the negative control
-- [ ] The agent answers `POST /v1/missing_bytes(closure)` from its own
+- [x] The agent answers `POST /v1/missing_bytes(closure)` from its own
       `/nix/store` with missing bytes and paths plus totals; the have-set is
       TTL-refreshed and never leaves the node toward the API server
-- [ ] The agent serves `/nix-cache-info`, `*.narinfo`, and `nar/*.nar`; every
+- [x] The agent serves `/nix-cache-info`, `*.narinfo`, and `nar/*.nar`; every
       served NAR hash-matches its narinfo; a partial NAR is never visible;
       concurrent same-path dumps coalesce
-- [ ] The LAN origin cache is running, preloaded with the pinned closures, and
+- [x] The LAN origin cache is running, preloaded with the pinned closures, and
       the agent's origin request and byte counters increment (no dead flags)
-- [ ] Smoke e2e passes: three k3d nodes seeded warm, mid, and cold; each node's
+- [x] Smoke e2e passes: three k3d nodes seeded warm, mid, and cold; each node's
       missing-bytes answer is correct for its state, and a NAR fetched from a
       peer verifies byte-identical by hash
-- [ ] `nix flake check` stays green throughout
+- [x] `nix flake check` stays green throughout
+
+## Status and results
+
+Phase 1 is complete: every criterion above passes. Reproduce with:
+
+```sh
+go test ./... && nix flake check   # unit and integration tests, manifests
+hack/e2e-k3d.sh                    # three-node k3d smoke
+hack/demo-real-closures.sh         # the numbers below, on the real closures
+```
+
+Measured on the pinned closures (`nix build .#closures`, `summary.json`).
+"Closure delta" compares closure sizes, which is what the 1 to 5 percent
+ladder constrains; "transfer" is what a node on the previous version
+actually fetches, which is slightly larger because the root path changes on
+every version too. The agent's `missing_bytes` reports the transfer figure.
+
+| Step | Closure delta | Transfer |
+|---|---|---|
+| churn-v1 to v2 | 205,360 B (2.45%) | 206,248 B (2.40% of v2) |
+| churn-v2 to v3 | 279,088 B (3.25%) | 280,248 B (3.16% of v3) |
+| churn-v3 to v4 | 361,008 B (4.07%) | 362,440 B (3.92% of v4) |
+| churn-v1 to v4 | 845,456 B (10.08%) | 846,344 B (9.16% of v4) |
+
+`missing_bytes` from agents over simulated node stores:
+
+| Closure | Node holding churn-v1 | Node holding hello | Empty node |
+|---|---|---|---|
+| churn-v2 | 206 KB of 8.6 MB (2.4%) | 100% | 100% |
+| churn-v4 | 846 KB of 9.2 MB (9.2%) | 100% | 100% |
+| share-b (coreutils) | 100% | 13.3 MB of 51.1 MB (26.1%) | 100% |
+| unrelated-a, unrelated-b | 100% | 100% | 100% |
+
+hello and coreutils share glibc, libidn2, libunistring and libgcc; the
+unrelated pair shares nothing.
+
+Correctness evidence:
+
+- NARs from the pure-Go writer (no `nix-store` on PATH) for all 17 paths of
+  churn-v4, share-b and unrelated-a, 60 MB including glibc, are
+  byte-identical to the narHash and narSize nix recorded in the manifests.
+- The agent answers narinfo from the catalog's narHash and narSize when it
+  has them, and refuses to serve a NAR whose dump disagrees with the catalog
+  (`k3snix_nar_hash_mismatches`), so a served NAR always matches its narinfo
+  and the manifest.
+- The origin signs narinfo with a nix key. In the smoke, `nix store verify`
+  checks signatures and contents of the churn-v1 closure against it; the
+  demo has a stock `nix copy` pull the whole hello closure, references
+  included, into an empty store.
+- `POST /v1/origin_probe {"hash": ...}` downloads one NAR from the origin,
+  verifies it against the narinfo and discards it, so the origin counters
+  count real NAR bytes (8.4 MB for churn-base in the smoke), still without
+  fetching anything on a pod start.
+
+Deviations from the plan, kept deliberately:
+
+- The origin is a `k3snix-agent` in `-catalog-only` mode over the host store
+  rather than nix-serve or attic. It serves exactly the pinned closures in
+  its catalog (anything else on the host answers 404), signs its narinfo,
+  and needs no extra image.
+- Manifests come from `exportReferencesGraph` inside the closures
+  derivation, which carries the same path, narSize, narHash and references
+  as `nix path-info --json`; the churn steps are checked in that derivation
+  rather than with `nix path-info -rS`.
+- The have-set skips any path with a `<path>.lock` beside it, which nix
+  holds while it writes a path. It does not read the nix database; that
+  belongs with materialization in Phase 2.
+
+Open before Phase 3: the nix-snapshotter spike (see
+[phases.md](./phases.md)) has not been run.
 
 ## Build order
 
@@ -76,9 +146,9 @@ Each slice lands with its tests before the next begins.
    `nix-store --dump` with the pure-Go NAR writer as fallback. Done when a
    dump, serve, and re-hash round-trip test passes and concurrent requests
    produce one dump.
-4. **Origin.** Stand up a controlled binary cache (nix-serve or attic) on the
-   LAN, preload it with the pinned closures, wire the agent's origin URL and
-   counters. Done when the origin answers narinfo requests in the smoke
+4. **Origin.** Stand up a controlled binary cache on the LAN (a
+   catalog-only, signing k3snix-agent; see Status and results), preload it
+   with the pinned closures, wire the agent's origin URL and counters. Done when the origin answers narinfo requests in the smoke
    environment and its counters move.
 5. **Smoke e2e.** Three-node k3d, seeded stores, catalog as a ConfigMap,
    agents as a DaemonSet. Done when the acceptance checklist above passes end
@@ -126,7 +196,7 @@ flowchart TD
     end
 
     subgraph SL4["Slice 4: origin"]
-        J["LAN binary cache preloaded with pinned closures"] --> K["Agent origin URL configured, counters live"]
+        J["LAN binary cache preloaded with pinned closures, signed narinfo"] --> K["Agent origin URL configured, counters live"]
     end
 
     subgraph SL5["Slice 5: smoke e2e on k3d"]
@@ -150,7 +220,7 @@ flowchart TB
     ID --> CAT["Catalog<br/>closure-id to manifest"]
 
     subgraph LAN["LAN, controlled - no public internet"]
-        ORIGIN["Origin binary cache<br/>nix-serve or attic<br/>preloaded with pinned closures"]
+        ORIGIN["Origin binary cache<br/>k3snix-agent, catalog-only, signed<br/>preloaded with pinned closures"]
     end
 
     subgraph CLUSTER["K3s cluster on k3d: one server, two agents"]

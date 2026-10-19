@@ -17,26 +17,30 @@ fails, the delivery leg changes and every later phase is affected.
 
 Build items:
 
-- [ ] Pinned flake builds the workload closures and emits path-info manifests
+- [x] Pinned flake builds the workload closures and emits path-info manifests
       with path, narSize, narHash, and references
-- [ ] Content-derived closure IDs (a fingerprint over the path list plus sizes)
+- [x] Content-derived closure IDs (a fingerprint over the path list plus sizes)
       and the catalog that maps IDs to manifests
-- [ ] Go parser for nix path-info JSON and the project format, plus diff and
+- [x] Go parser for nix path-info JSON and the project format, plus diff and
       missing computations
-- [ ] Node agent inventory: TTL-refreshed have-set over `/nix/store`, the
+- [x] Node agent inventory: TTL-refreshed have-set over `/nix/store`, the
       missing-bytes API, and nothing sent to the API server
-- [ ] Node agent peer serving: nix-cache-info, narinfo, and NAR endpoints;
+- [x] Node agent peer serving: nix-cache-info, narinfo, and NAR endpoints;
       complete NARs only; coalesced dumps; `nix-store --dump` with a pure-Go
       fallback
-- [ ] Controlled LAN origin cache, preloaded and instrumented, with live origin
+- [x] Controlled LAN origin cache, preloaded and instrumented, with live origin
       counters
-- [ ] Three workload families with measured deltas: the churn ladder v1 to v4, a
+- [x] Three workload families with measured deltas: the churn ladder v1 to v4, a
       glibc-sharing pair, and an unrelated negative control
-- [ ] Smoke e2e on three k3d nodes seeded warm, mid, and cold
+- [x] Smoke e2e on three k3d nodes seeded warm, mid, and cold
 
 Exit criteria are the acceptance checklist in [phase1.md](./phase1.md). Exit
 demo: every node answers missing_bytes correctly for its state and a peer serves
 a hash-verifiable NAR, with no scheduling code in the tree.
+
+Status: complete. Results and the deliberate deviations from the plan are in
+[phase1.md](./phase1.md#status-and-results). The Phase 0 snapshotter spike
+above is still open.
 
 ## Phase 2 — control plane: cache-aware scheduling and delta fetch
 
