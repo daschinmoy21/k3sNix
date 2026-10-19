@@ -61,3 +61,18 @@ func TestCatalogRepeatedLabelSameClosure(t *testing.T) {
 		t.Fatalf("stored fingerprints = %d, want 1", len(cat.byFingerprint))
 	}
 }
+
+func TestCatalogClosures(t *testing.T) {
+	dir := writeCatalog(t, map[string]string{
+		"a.json":       `{"label":"a","paths":[{"path":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a","narSize":1}]}`,
+		"a-again.json": `{"label":"a2","paths":[{"path":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a","narSize":1}]}`,
+		"b.json":       `{"label":"b","paths":[{"path":"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b","narSize":2}]}`,
+	})
+	cat, err := LoadCatalog(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cat.Closures()); got != 2 {
+		t.Fatalf("Closures() = %d, want 2 (one per fingerprint)", got)
+	}
+}

@@ -12,6 +12,10 @@ import (
 	"k3snix/internal/closure"
 )
 
+// lockSuffix marks the lock file nix holds beside a store path it is
+// writing.
+const lockSuffix = ".lock"
+
 // Store is a cached listing of a Nix store directory.
 type Store struct {
 	Dir string
@@ -38,7 +42,13 @@ func New(dir string) *Store {
 }
 
 // Refresh rescans the store directory. Keys are full paths. Entries whose
-// name starts with "." are skipped. Scans run one at a time.
+// name starts with "." are skipped, and so are paths nix is still writing:
+// nix holds "<path>.lock" while it builds or substitutes <path> and deletes
+// it once the path is registered, so a path with a lock beside it may be
+// half-written. The lock files themselves are never paths. A lock left by a
+// crashed nix keeps its path out of the have-set, which over-reports missing
+// bytes rather than claiming bytes the node may not hold. Scans run one at a
+// time.
 func (s *Store) Refresh() error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
@@ -50,11 +60,20 @@ func (s *Store) refresh() error {
 	if err != nil {
 		return err
 	}
+	locked := map[string]struct{}{}
+	for _, e := range ents {
+		if name := e.Name(); strings.HasSuffix(name, lockSuffix) {
+			locked[strings.TrimSuffix(name, lockSuffix)] = struct{}{}
+		}
+	}
 	have := make(map[string]struct{}, len(ents))
 	byHash := make(map[string]string, len(ents))
 	for _, e := range ents {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || strings.HasSuffix(name, lockSuffix) {
+			continue
+		}
+		if _, ok := locked[name]; ok {
 			continue
 		}
 		path := filepath.Join(s.Dir, name)
