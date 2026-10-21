@@ -10,8 +10,10 @@ execution phases in spec.md. Phase 1 has its own detailed plan in
 One item from spec.md must be settled before or during Phase 1, because Phases 2
 and 3 depend on it: nix-snapshotter running a real pod rootfs on a multi-node
 K3s cluster. The flake already wires the module, but nobody has proven it end to
-end. Treat it as an early spike that can run in parallel with Phase 1. If it
-fails, the delivery leg changes and every later phase is affected.
+end. Treat it as an early, time-boxed spike that can run in parallel with
+Phase 1. It no longer gates the project: the host-store design in
+[evaluation.md](./evaluation.md) is the preferred delivery leg, and a failed
+spike only drops the optional `k3snix-snapshotter` arm.
 
 ## Phase 1 — data plane: closure analysis and cache inventory
 
@@ -79,14 +81,19 @@ Exit criteria:
 
 ## Phase 3 — runtime and benchmark
 
-Box 5, runtime. Build items:
+Box 5, runtime. The host store is the preferred design and nix-snapshotter an
+optional comparison run; see [evaluation.md](./evaluation.md). Build items:
 
-- [ ] nix-snapshotter live on K3s through the k3s-with-snapshotter module (the
-      Phase 0 spike made real)
-- [ ] Pod rootfs assembled from store paths with no image copy, and a
-      per-container writable upper layer
+- [ ] Host-store delivery: pods run from a read-only host `/nix/store`, an
+      init container has the agent fetch missing paths, and the agent holds a
+      GC root per pod
+- [ ] Works on both K3s runtimes: containerd and docker (`--docker`)
+- [ ] Optional: nix-snapshotter live on K3s through the k3s-with-snapshotter
+      module (the Phase 0 spike made real), pod rootfs assembled from store
+      paths with no image copy
 - [ ] Pod writes never mutate `/nix/store`, and removing a pod never deletes
       paths another pod requires
+- [ ] LRScheduler reimplemented as a Score plugin in `baselines/lrscheduler/`
 
 Box 6, benchmark. Build items:
 
@@ -132,4 +139,5 @@ wording before the viva so the panel hears one story.
 - The B2 baseline and the harness are the long poles; start them during Phase 2
   rather than after Phase 3, because spec.md forbids a results chapter without
   B2.
-- The snapshotter spike runs in parallel with Phase 1 and blocks only Phase 3.
+- The snapshotter spike runs in parallel with Phase 1 and blocks only the
+  optional `k3snix-snapshotter` arm.

@@ -38,4 +38,4 @@ and Python.
 ## Dependencies
 
 - `nixpkgs` (nixos-unstable)
-- `pdtpartners/nix-snapshotter` — reused for the container rootfs path, not vendored
+- `pdtpartners/nix-snapshotter` — optional container rootfs path for one benchmark arm, not vendored (see `docs/evaluation.md`)
