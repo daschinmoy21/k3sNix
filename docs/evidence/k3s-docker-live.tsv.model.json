@@ -1,0 +1,2482 @@
+{
+  "imageLocalitySizeSource": "runtime-reported image sizes",
+  "imageLocalityNodes": 4,
+  "nodes": [
+    {
+      "name": "node-churn-v1",
+      "holds": [
+        "churn-v1"
+      ]
+    },
+    {
+      "name": "node-hello",
+      "holds": [
+        "share-a"
+      ]
+    },
+    {
+      "name": "node-empty",
+      "holds": null
+    }
+  ],
+  "deliveries": [
+    "nix",
+    "oci-fine",
+    "oci-coarse"
+  ],
+  "matrix": [
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v1",
+      "delivery": "nix",
+      "units": {
+        "missing": 0,
+        "total": 3
+      },
+      "raw": {
+        "missing": 0,
+        "total": 8389776
+      },
+      "gzip": {
+        "missing": 0,
+        "total": 8666
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v1",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 0,
+        "total": 3
+      },
+      "raw": {
+        "missing": 0,
+        "total": 8417280
+      },
+      "gzip": {
+        "missing": 0,
+        "total": 8875
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v1",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 0,
+        "total": 1
+      },
+      "raw": {
+        "missing": 0,
+        "total": 8396800
+      },
+      "gzip": {
+        "missing": 0,
+        "total": 8666
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v2",
+      "delivery": "nix",
+      "units": {
+        "missing": 3,
+        "total": 4
+      },
+      "raw": {
+        "missing": 206248,
+        "total": 8595136
+      },
+      "gzip": {
+        "missing": 780,
+        "total": 9075
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v2",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 3,
+        "total": 4
+      },
+      "raw": {
+        "missing": 235520,
+        "total": 8632320
+      },
+      "gzip": {
+        "missing": 988,
+        "total": 9350
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v2",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8601600,
+        "total": 8601600
+      },
+      "gzip": {
+        "missing": 9069,
+        "total": 9069
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v3",
+      "delivery": "nix",
+      "units": {
+        "missing": 4,
+        "total": 5
+      },
+      "raw": {
+        "missing": 485336,
+        "total": 8874224
+      },
+      "gzip": {
+        "missing": 1247,
+        "total": 9542
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v3",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 4,
+        "total": 5
+      },
+      "raw": {
+        "missing": 522240,
+        "total": 8919040
+      },
+      "gzip": {
+        "missing": 1528,
+        "total": 9890
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v3",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8888320,
+        "total": 8888320
+      },
+      "gzip": {
+        "missing": 9526,
+        "total": 9526
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v4",
+      "delivery": "nix",
+      "units": {
+        "missing": 5,
+        "total": 6
+      },
+      "raw": {
+        "missing": 846344,
+        "total": 9235232
+      },
+      "gzip": {
+        "missing": 1793,
+        "total": 10088
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v4",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 5,
+        "total": 6
+      },
+      "raw": {
+        "missing": 890880,
+        "total": 9287680
+      },
+      "gzip": {
+        "missing": 2138,
+        "total": 10500
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "churn-v4",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 9246720,
+        "total": 9246720
+      },
+      "gzip": {
+        "missing": 10042,
+        "total": 10042
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "share-a",
+      "delivery": "nix",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 37997544,
+        "total": 37997544
+      },
+      "gzip": {
+        "missing": 13242633,
+        "total": 13242633
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "share-a",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 38727680,
+        "total": 38727680
+      },
+      "gzip": {
+        "missing": 13268765,
+        "total": 13268765
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "share-a",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 38707200,
+        "total": 38707200
+      },
+      "gzip": {
+        "missing": 13271590,
+        "total": 13271590
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "share-b",
+      "delivery": "nix",
+      "units": {
+        "missing": 10,
+        "total": 10
+      },
+      "raw": {
+        "missing": 51052016,
+        "total": 51052016
+      },
+      "gzip": {
+        "missing": 18138668,
+        "total": 18138668
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "share-b",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 10,
+        "total": 10
+      },
+      "raw": {
+        "missing": 51855360,
+        "total": 51855360
+      },
+      "gzip": {
+        "missing": 18165777,
+        "total": 18165777
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "share-b",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 51793920,
+        "total": 51793920
+      },
+      "gzip": {
+        "missing": 18164835,
+        "total": 18164835
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "unrelated-a",
+      "delivery": "nix",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 65648,
+        "total": 65648
+      },
+      "gzip": {
+        "missing": 169,
+        "total": 169
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "unrelated-a",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 71680,
+        "total": 71680
+      },
+      "gzip": {
+        "missing": 260,
+        "total": 260
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "unrelated-a",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 71680,
+        "total": 71680
+      },
+      "gzip": {
+        "missing": 260,
+        "total": 260
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "unrelated-b",
+      "delivery": "nix",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 98416,
+        "total": 98416
+      },
+      "gzip": {
+        "missing": 204,
+        "total": 204
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "unrelated-b",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 102400,
+        "total": 102400
+      },
+      "gzip": {
+        "missing": 290,
+        "total": 290
+      }
+    },
+    {
+      "node": "node-churn-v1",
+      "target": "unrelated-b",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 102400,
+        "total": 102400
+      },
+      "gzip": {
+        "missing": 290,
+        "total": 290
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v1",
+      "delivery": "nix",
+      "units": {
+        "missing": 3,
+        "total": 3
+      },
+      "raw": {
+        "missing": 8389776,
+        "total": 8389776
+      },
+      "gzip": {
+        "missing": 8666,
+        "total": 8666
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v1",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 3,
+        "total": 3
+      },
+      "raw": {
+        "missing": 8417280,
+        "total": 8417280
+      },
+      "gzip": {
+        "missing": 8875,
+        "total": 8875
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v1",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8396800,
+        "total": 8396800
+      },
+      "gzip": {
+        "missing": 8666,
+        "total": 8666
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v2",
+      "delivery": "nix",
+      "units": {
+        "missing": 4,
+        "total": 4
+      },
+      "raw": {
+        "missing": 8595136,
+        "total": 8595136
+      },
+      "gzip": {
+        "missing": 9075,
+        "total": 9075
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v2",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 4,
+        "total": 4
+      },
+      "raw": {
+        "missing": 8632320,
+        "total": 8632320
+      },
+      "gzip": {
+        "missing": 9350,
+        "total": 9350
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v2",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8601600,
+        "total": 8601600
+      },
+      "gzip": {
+        "missing": 9069,
+        "total": 9069
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v3",
+      "delivery": "nix",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 8874224,
+        "total": 8874224
+      },
+      "gzip": {
+        "missing": 9542,
+        "total": 9542
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v3",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 8919040,
+        "total": 8919040
+      },
+      "gzip": {
+        "missing": 9890,
+        "total": 9890
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v3",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8888320,
+        "total": 8888320
+      },
+      "gzip": {
+        "missing": 9526,
+        "total": 9526
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v4",
+      "delivery": "nix",
+      "units": {
+        "missing": 6,
+        "total": 6
+      },
+      "raw": {
+        "missing": 9235232,
+        "total": 9235232
+      },
+      "gzip": {
+        "missing": 10088,
+        "total": 10088
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v4",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 6,
+        "total": 6
+      },
+      "raw": {
+        "missing": 9287680,
+        "total": 9287680
+      },
+      "gzip": {
+        "missing": 10500,
+        "total": 10500
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "churn-v4",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 9246720,
+        "total": 9246720
+      },
+      "gzip": {
+        "missing": 10042,
+        "total": 10042
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "share-a",
+      "delivery": "nix",
+      "units": {
+        "missing": 0,
+        "total": 5
+      },
+      "raw": {
+        "missing": 0,
+        "total": 37997544
+      },
+      "gzip": {
+        "missing": 0,
+        "total": 13242633
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "share-a",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 0,
+        "total": 5
+      },
+      "raw": {
+        "missing": 0,
+        "total": 38727680
+      },
+      "gzip": {
+        "missing": 0,
+        "total": 13268765
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "share-a",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 0,
+        "total": 1
+      },
+      "raw": {
+        "missing": 0,
+        "total": 38707200
+      },
+      "gzip": {
+        "missing": 0,
+        "total": 13271590
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "share-b",
+      "delivery": "nix",
+      "units": {
+        "missing": 6,
+        "total": 10
+      },
+      "raw": {
+        "missing": 13334096,
+        "total": 51052016
+      },
+      "gzip": {
+        "missing": 4969140,
+        "total": 18138668
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "share-b",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 6,
+        "total": 10
+      },
+      "raw": {
+        "missing": 13475840,
+        "total": 51855360
+      },
+      "gzip": {
+        "missing": 4972954,
+        "total": 18165777
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "share-b",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 51793920,
+        "total": 51793920
+      },
+      "gzip": {
+        "missing": 18164835,
+        "total": 18164835
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "unrelated-a",
+      "delivery": "nix",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 65648,
+        "total": 65648
+      },
+      "gzip": {
+        "missing": 169,
+        "total": 169
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "unrelated-a",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 71680,
+        "total": 71680
+      },
+      "gzip": {
+        "missing": 260,
+        "total": 260
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "unrelated-a",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 71680,
+        "total": 71680
+      },
+      "gzip": {
+        "missing": 260,
+        "total": 260
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "unrelated-b",
+      "delivery": "nix",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 98416,
+        "total": 98416
+      },
+      "gzip": {
+        "missing": 204,
+        "total": 204
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "unrelated-b",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 102400,
+        "total": 102400
+      },
+      "gzip": {
+        "missing": 290,
+        "total": 290
+      }
+    },
+    {
+      "node": "node-hello",
+      "target": "unrelated-b",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 102400,
+        "total": 102400
+      },
+      "gzip": {
+        "missing": 290,
+        "total": 290
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v1",
+      "delivery": "nix",
+      "units": {
+        "missing": 3,
+        "total": 3
+      },
+      "raw": {
+        "missing": 8389776,
+        "total": 8389776
+      },
+      "gzip": {
+        "missing": 8666,
+        "total": 8666
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v1",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 3,
+        "total": 3
+      },
+      "raw": {
+        "missing": 8417280,
+        "total": 8417280
+      },
+      "gzip": {
+        "missing": 8875,
+        "total": 8875
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v1",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8396800,
+        "total": 8396800
+      },
+      "gzip": {
+        "missing": 8666,
+        "total": 8666
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v2",
+      "delivery": "nix",
+      "units": {
+        "missing": 4,
+        "total": 4
+      },
+      "raw": {
+        "missing": 8595136,
+        "total": 8595136
+      },
+      "gzip": {
+        "missing": 9075,
+        "total": 9075
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v2",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 4,
+        "total": 4
+      },
+      "raw": {
+        "missing": 8632320,
+        "total": 8632320
+      },
+      "gzip": {
+        "missing": 9350,
+        "total": 9350
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v2",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8601600,
+        "total": 8601600
+      },
+      "gzip": {
+        "missing": 9069,
+        "total": 9069
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v3",
+      "delivery": "nix",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 8874224,
+        "total": 8874224
+      },
+      "gzip": {
+        "missing": 9542,
+        "total": 9542
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v3",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 8919040,
+        "total": 8919040
+      },
+      "gzip": {
+        "missing": 9890,
+        "total": 9890
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v3",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 8888320,
+        "total": 8888320
+      },
+      "gzip": {
+        "missing": 9526,
+        "total": 9526
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v4",
+      "delivery": "nix",
+      "units": {
+        "missing": 6,
+        "total": 6
+      },
+      "raw": {
+        "missing": 9235232,
+        "total": 9235232
+      },
+      "gzip": {
+        "missing": 10088,
+        "total": 10088
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v4",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 6,
+        "total": 6
+      },
+      "raw": {
+        "missing": 9287680,
+        "total": 9287680
+      },
+      "gzip": {
+        "missing": 10500,
+        "total": 10500
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "churn-v4",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 9246720,
+        "total": 9246720
+      },
+      "gzip": {
+        "missing": 10042,
+        "total": 10042
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "share-a",
+      "delivery": "nix",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 37997544,
+        "total": 37997544
+      },
+      "gzip": {
+        "missing": 13242633,
+        "total": 13242633
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "share-a",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 5,
+        "total": 5
+      },
+      "raw": {
+        "missing": 38727680,
+        "total": 38727680
+      },
+      "gzip": {
+        "missing": 13268765,
+        "total": 13268765
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "share-a",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 38707200,
+        "total": 38707200
+      },
+      "gzip": {
+        "missing": 13271590,
+        "total": 13271590
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "share-b",
+      "delivery": "nix",
+      "units": {
+        "missing": 10,
+        "total": 10
+      },
+      "raw": {
+        "missing": 51052016,
+        "total": 51052016
+      },
+      "gzip": {
+        "missing": 18138668,
+        "total": 18138668
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "share-b",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 10,
+        "total": 10
+      },
+      "raw": {
+        "missing": 51855360,
+        "total": 51855360
+      },
+      "gzip": {
+        "missing": 18165777,
+        "total": 18165777
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "share-b",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 51793920,
+        "total": 51793920
+      },
+      "gzip": {
+        "missing": 18164835,
+        "total": 18164835
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "unrelated-a",
+      "delivery": "nix",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 65648,
+        "total": 65648
+      },
+      "gzip": {
+        "missing": 169,
+        "total": 169
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "unrelated-a",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 71680,
+        "total": 71680
+      },
+      "gzip": {
+        "missing": 260,
+        "total": 260
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "unrelated-a",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 71680,
+        "total": 71680
+      },
+      "gzip": {
+        "missing": 260,
+        "total": 260
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "unrelated-b",
+      "delivery": "nix",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 98416,
+        "total": 98416
+      },
+      "gzip": {
+        "missing": 204,
+        "total": 204
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "unrelated-b",
+      "delivery": "oci-fine",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 102400,
+        "total": 102400
+      },
+      "gzip": {
+        "missing": 290,
+        "total": 290
+      }
+    },
+    {
+      "node": "node-empty",
+      "target": "unrelated-b",
+      "delivery": "oci-coarse",
+      "units": {
+        "missing": 1,
+        "total": 1
+      },
+      "raw": {
+        "missing": 102400,
+        "total": 102400
+      },
+      "gzip": {
+        "missing": 290,
+        "total": 290
+      }
+    }
+  ],
+  "ladder": [
+    {
+      "from": "churn-v1",
+      "to": "churn-v2",
+      "delivery": "nix",
+      "raw": {
+        "missing": 206248,
+        "total": 8595136
+      },
+      "gzip": {
+        "missing": 780,
+        "total": 9075
+      }
+    },
+    {
+      "from": "churn-v1",
+      "to": "churn-v2",
+      "delivery": "oci-fine",
+      "raw": {
+        "missing": 235520,
+        "total": 8632320
+      },
+      "gzip": {
+        "missing": 988,
+        "total": 9350
+      }
+    },
+    {
+      "from": "churn-v1",
+      "to": "churn-v2",
+      "delivery": "oci-coarse",
+      "raw": {
+        "missing": 8601600,
+        "total": 8601600
+      },
+      "gzip": {
+        "missing": 9069,
+        "total": 9069
+      }
+    },
+    {
+      "from": "churn-v2",
+      "to": "churn-v3",
+      "delivery": "nix",
+      "raw": {
+        "missing": 280248,
+        "total": 8874224
+      },
+      "gzip": {
+        "missing": 891,
+        "total": 9542
+      }
+    },
+    {
+      "from": "churn-v2",
+      "to": "churn-v3",
+      "delivery": "oci-fine",
+      "raw": {
+        "missing": 307200,
+        "total": 8919040
+      },
+      "gzip": {
+        "missing": 1104,
+        "total": 9890
+      }
+    },
+    {
+      "from": "churn-v2",
+      "to": "churn-v3",
+      "delivery": "oci-coarse",
+      "raw": {
+        "missing": 8888320,
+        "total": 8888320
+      },
+      "gzip": {
+        "missing": 9526,
+        "total": 9526
+      }
+    },
+    {
+      "from": "churn-v3",
+      "to": "churn-v4",
+      "delivery": "nix",
+      "raw": {
+        "missing": 362440,
+        "total": 9235232
+      },
+      "gzip": {
+        "missing": 1007,
+        "total": 10088
+      }
+    },
+    {
+      "from": "churn-v3",
+      "to": "churn-v4",
+      "delivery": "oci-fine",
+      "raw": {
+        "missing": 389120,
+        "total": 9287680
+      },
+      "gzip": {
+        "missing": 1220,
+        "total": 10500
+      }
+    },
+    {
+      "from": "churn-v3",
+      "to": "churn-v4",
+      "delivery": "oci-coarse",
+      "raw": {
+        "missing": 9246720,
+        "total": 9246720
+      },
+      "gzip": {
+        "missing": 10042,
+        "total": 10042
+      }
+    },
+    {
+      "from": "churn-v1",
+      "to": "churn-v4",
+      "delivery": "nix",
+      "raw": {
+        "missing": 846344,
+        "total": 9235232
+      },
+      "gzip": {
+        "missing": 1793,
+        "total": 10088
+      }
+    },
+    {
+      "from": "churn-v1",
+      "to": "churn-v4",
+      "delivery": "oci-fine",
+      "raw": {
+        "missing": 890880,
+        "total": 9287680
+      },
+      "gzip": {
+        "missing": 2138,
+        "total": 10500
+      }
+    },
+    {
+      "from": "churn-v1",
+      "to": "churn-v4",
+      "delivery": "oci-coarse",
+      "raw": {
+        "missing": 9246720,
+        "total": 9246720
+      },
+      "gzip": {
+        "missing": 10042,
+        "total": 10042
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "k3snix",
+      "delivery": "nix",
+      "signal": "paths"
+    },
+    {
+      "name": "default-hoststore",
+      "delivery": "nix",
+      "signal": "none"
+    },
+    {
+      "name": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "signal": "layers"
+    },
+    {
+      "name": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "signal": "layers"
+    },
+    {
+      "name": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "signal": "image"
+    },
+    {
+      "name": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "signal": "image"
+    }
+  ],
+  "placement": [
+    {
+      "target": "churn-v1",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 1,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 0,
+        "node-empty": 8389776,
+        "node-hello": 8389776
+      },
+      "transferMin": 0,
+      "transferMax": 0
+    },
+    {
+      "target": "churn-v1",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 0,
+        "node-empty": 8389776,
+        "node-hello": 8389776
+      },
+      "transferMin": 0,
+      "transferMax": 8389776
+    },
+    {
+      "target": "churn-v1",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 1,
+        "node-empty": 0,
+        "node-hello": 0.001215066828675577
+      },
+      "transferByNode": {
+        "node-churn-v1": 0,
+        "node-empty": 8427520,
+        "node-hello": 8417280
+      },
+      "transferMin": 0,
+      "transferMax": 0
+    },
+    {
+      "target": "churn-v1",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 1,
+        "node-empty": 0,
+        "node-hello": 0.001218026796589525
+      },
+      "transferByNode": {
+        "node-churn-v1": 0,
+        "node-empty": 8407040,
+        "node-hello": 8396800
+      },
+      "transferMin": 0,
+      "transferMax": 0
+    },
+    {
+      "target": "churn-v1",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "imageSizes": {
+        "node-churn-v1": 8464646
+      },
+      "transferByNode": {
+        "node-churn-v1": 0,
+        "node-empty": 8427520,
+        "node-hello": 8417280
+      },
+      "transferMin": 0,
+      "transferMax": 8427520
+    },
+    {
+      "target": "churn-v1",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "imageSizes": {
+        "node-churn-v1": 8439072
+      },
+      "transferByNode": {
+        "node-churn-v1": 0,
+        "node-empty": 8407040,
+        "node-hello": 8396800
+      },
+      "transferMin": 0,
+      "transferMax": 8407040
+    },
+    {
+      "target": "churn-v2",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 0.9760041027855755,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 206248,
+        "node-empty": 8595136,
+        "node-hello": 8595136
+      },
+      "transferMin": 206248,
+      "transferMax": 206248
+    },
+    {
+      "target": "churn-v2",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 206248,
+        "node-empty": 8595136,
+        "node-hello": 8595136
+      },
+      "transferMin": 206248,
+      "transferMax": 8595136
+    },
+    {
+      "target": "churn-v2",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 0.9727488151658767,
+        "node-empty": 0,
+        "node-hello": 0.001184834123222749
+      },
+      "transferByNode": {
+        "node-churn-v1": 235520,
+        "node-empty": 8642560,
+        "node-hello": 8632320
+      },
+      "transferMin": 235520,
+      "transferMax": 235520
+    },
+    {
+      "target": "churn-v2",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.0011890606420927466,
+        "node-empty": 0,
+        "node-hello": 0.0011890606420927466
+      },
+      "transferByNode": {
+        "node-churn-v1": 8601600,
+        "node-empty": 8611840,
+        "node-hello": 8601600
+      },
+      "transferMin": 8601600,
+      "transferMax": 8601600
+    },
+    {
+      "target": "churn-v2",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 235520,
+        "node-empty": 8642560,
+        "node-hello": 8632320
+      },
+      "transferMin": 235520,
+      "transferMax": 8642560
+    },
+    {
+      "target": "churn-v2",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 8601600,
+        "node-empty": 8611840,
+        "node-hello": 8601600
+      },
+      "transferMin": 8601600,
+      "transferMax": 8611840
+    },
+    {
+      "target": "churn-v3",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 0.9453094715661899,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 485336,
+        "node-empty": 8874224,
+        "node-hello": 8874224
+      },
+      "transferMin": 485336,
+      "transferMax": 485336
+    },
+    {
+      "target": "churn-v3",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 485336,
+        "node-empty": 8874224,
+        "node-hello": 8874224
+      },
+      "transferMin": 485336,
+      "transferMax": 8874224
+    },
+    {
+      "target": "churn-v3",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 0.9415137614678899,
+        "node-empty": 0,
+        "node-hello": 0.0011467889908256881
+      },
+      "transferByNode": {
+        "node-churn-v1": 522240,
+        "node-empty": 8929280,
+        "node-hello": 8919040
+      },
+      "transferMin": 522240,
+      "transferMax": 522240
+    },
+    {
+      "target": "churn-v3",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.0011507479861910242,
+        "node-empty": 0,
+        "node-hello": 0.0011507479861910242
+      },
+      "transferByNode": {
+        "node-churn-v1": 8888320,
+        "node-empty": 8898560,
+        "node-hello": 8888320
+      },
+      "transferMin": 8888320,
+      "transferMax": 8888320
+    },
+    {
+      "target": "churn-v3",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 522240,
+        "node-empty": 8929280,
+        "node-hello": 8919040
+      },
+      "transferMin": 522240,
+      "transferMax": 8929280
+    },
+    {
+      "target": "churn-v3",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 8888320,
+        "node-empty": 8898560,
+        "node-hello": 8888320
+      },
+      "transferMin": 8888320,
+      "transferMax": 8898560
+    },
+    {
+      "target": "churn-v4",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 0.9083570396498972,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 846344,
+        "node-empty": 9235232,
+        "node-hello": 9235232
+      },
+      "transferMin": 846344,
+      "transferMax": 846344
+    },
+    {
+      "target": "churn-v4",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 846344,
+        "node-empty": 9235232,
+        "node-hello": 9235232
+      },
+      "transferMin": 846344,
+      "transferMax": 9235232
+    },
+    {
+      "target": "churn-v4",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1"
+      ],
+      "scores": {
+        "node-churn-v1": 0.9041850220264317,
+        "node-empty": 0,
+        "node-hello": 0.0011013215859030838
+      },
+      "transferByNode": {
+        "node-churn-v1": 890880,
+        "node-empty": 9297920,
+        "node-hello": 9287680
+      },
+      "transferMin": 890880,
+      "transferMax": 890880
+    },
+    {
+      "target": "churn-v4",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.0011061946902654867,
+        "node-empty": 0,
+        "node-hello": 0.0011061946902654867
+      },
+      "transferByNode": {
+        "node-churn-v1": 9246720,
+        "node-empty": 9256960,
+        "node-hello": 9246720
+      },
+      "transferMin": 9246720,
+      "transferMax": 9246720
+    },
+    {
+      "target": "churn-v4",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 890880,
+        "node-empty": 9297920,
+        "node-hello": 9287680
+      },
+      "transferMin": 890880,
+      "transferMax": 9297920
+    },
+    {
+      "target": "churn-v4",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 9246720,
+        "node-empty": 9256960,
+        "node-hello": 9246720
+      },
+      "transferMin": 9246720,
+      "transferMax": 9256960
+    },
+    {
+      "target": "share-a",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 1
+      },
+      "transferByNode": {
+        "node-churn-v1": 37997544,
+        "node-empty": 37997544,
+        "node-hello": 0
+      },
+      "transferMin": 0,
+      "transferMax": 0
+    },
+    {
+      "target": "share-a",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 37997544,
+        "node-empty": 37997544,
+        "node-hello": 0
+      },
+      "transferMin": 0,
+      "transferMax": 37997544
+    },
+    {
+      "target": "share-a",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.0002643404705260375,
+        "node-empty": 0,
+        "node-hello": 1
+      },
+      "transferByNode": {
+        "node-churn-v1": 38727680,
+        "node-empty": 38737920,
+        "node-hello": 0
+      },
+      "transferMin": 0,
+      "transferMax": 0
+    },
+    {
+      "target": "share-a",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.0002644802962179318,
+        "node-empty": 0,
+        "node-hello": 1
+      },
+      "transferByNode": {
+        "node-churn-v1": 38707200,
+        "node-empty": 38717440,
+        "node-hello": 0
+      },
+      "transferMin": 0,
+      "transferMax": 0
+    },
+    {
+      "target": "share-a",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "imageSizes": {
+        "node-hello": 54495811
+      },
+      "transferByNode": {
+        "node-churn-v1": 38727680,
+        "node-empty": 38737920,
+        "node-hello": 0
+      },
+      "transferMin": 0,
+      "transferMax": 38737920
+    },
+    {
+      "target": "share-a",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "imageSizes": {
+        "node-hello": 54437575
+      },
+      "transferByNode": {
+        "node-churn-v1": 38707200,
+        "node-empty": 38717440,
+        "node-hello": 0
+      },
+      "transferMin": 0,
+      "transferMax": 38717440
+    },
+    {
+      "target": "share-b",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0.7388135269721767
+      },
+      "transferByNode": {
+        "node-churn-v1": 51052016,
+        "node-empty": 51052016,
+        "node-hello": 13334096
+      },
+      "transferMin": 13334096,
+      "transferMax": 13334096
+    },
+    {
+      "target": "share-b",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 51052016,
+        "node-empty": 51052016,
+        "node-hello": 13334096
+      },
+      "transferMin": 13334096,
+      "transferMax": 51052016
+    },
+    {
+      "target": "share-b",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.00019743336623889436,
+        "node-empty": 0,
+        "node-hello": 0.740177690029615
+      },
+      "transferByNode": {
+        "node-churn-v1": 51855360,
+        "node-empty": 51865600,
+        "node-hello": 13475840
+      },
+      "transferMin": 13475840,
+      "transferMax": 13475840
+    },
+    {
+      "target": "share-b",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.000197667523225934,
+        "node-empty": 0,
+        "node-hello": 0.000197667523225934
+      },
+      "transferByNode": {
+        "node-churn-v1": 51793920,
+        "node-empty": 51804160,
+        "node-hello": 51793920
+      },
+      "transferMin": 51793920,
+      "transferMax": 51793920
+    },
+    {
+      "target": "share-b",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 51855360,
+        "node-empty": 51865600,
+        "node-hello": 13475840
+      },
+      "transferMin": 13475840,
+      "transferMax": 51865600
+    },
+    {
+      "target": "share-b",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 51793920,
+        "node-empty": 51804160,
+        "node-hello": 51793920
+      },
+      "transferMin": 51793920,
+      "transferMax": 51804160
+    },
+    {
+      "target": "unrelated-a",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 65648,
+        "node-empty": 65648,
+        "node-hello": 65648
+      },
+      "transferMin": 65648,
+      "transferMax": 65648
+    },
+    {
+      "target": "unrelated-a",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 65648,
+        "node-empty": 65648,
+        "node-hello": 65648
+      },
+      "transferMin": 65648,
+      "transferMax": 65648
+    },
+    {
+      "target": "unrelated-a",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.125,
+        "node-empty": 0,
+        "node-hello": 0.125
+      },
+      "transferByNode": {
+        "node-churn-v1": 71680,
+        "node-empty": 81920,
+        "node-hello": 71680
+      },
+      "transferMin": 71680,
+      "transferMax": 71680
+    },
+    {
+      "target": "unrelated-a",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.125,
+        "node-empty": 0,
+        "node-hello": 0.125
+      },
+      "transferByNode": {
+        "node-churn-v1": 71680,
+        "node-empty": 81920,
+        "node-hello": 71680
+      },
+      "transferMin": 71680,
+      "transferMax": 71680
+    },
+    {
+      "target": "unrelated-a",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 71680,
+        "node-empty": 81920,
+        "node-hello": 71680
+      },
+      "transferMin": 71680,
+      "transferMax": 81920
+    },
+    {
+      "target": "unrelated-a",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 71680,
+        "node-empty": 81920,
+        "node-hello": 71680
+      },
+      "transferMin": 71680,
+      "transferMax": 81920
+    },
+    {
+      "target": "unrelated-b",
+      "arm": "k3snix",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 98416,
+        "node-empty": 98416,
+        "node-hello": 98416
+      },
+      "transferMin": 98416,
+      "transferMax": 98416
+    },
+    {
+      "target": "unrelated-b",
+      "arm": "default-hoststore",
+      "delivery": "nix",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 98416,
+        "node-empty": 98416,
+        "node-hello": 98416
+      },
+      "transferMin": 98416,
+      "transferMax": 98416
+    },
+    {
+      "target": "unrelated-b",
+      "arm": "lrscheduler (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.09090909090909091,
+        "node-empty": 0,
+        "node-hello": 0.09090909090909091
+      },
+      "transferByNode": {
+        "node-churn-v1": 102400,
+        "node-empty": 112640,
+        "node-hello": 102400
+      },
+      "transferMin": 102400,
+      "transferMax": 102400
+    },
+    {
+      "target": "unrelated-b",
+      "arm": "lrscheduler (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello"
+      ],
+      "scores": {
+        "node-churn-v1": 0.09090909090909091,
+        "node-empty": 0,
+        "node-hello": 0.09090909090909091
+      },
+      "transferByNode": {
+        "node-churn-v1": 102400,
+        "node-empty": 112640,
+        "node-hello": 102400
+      },
+      "transferMin": 102400,
+      "transferMax": 102400
+    },
+    {
+      "target": "unrelated-b",
+      "arm": "vanilla (fine)",
+      "delivery": "oci-fine",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 102400,
+        "node-empty": 112640,
+        "node-hello": 102400
+      },
+      "transferMin": 102400,
+      "transferMax": 112640
+    },
+    {
+      "target": "unrelated-b",
+      "arm": "vanilla (coarse)",
+      "delivery": "oci-coarse",
+      "picked": [
+        "node-churn-v1",
+        "node-hello",
+        "node-empty"
+      ],
+      "scores": {
+        "node-churn-v1": 0,
+        "node-empty": 0,
+        "node-hello": 0
+      },
+      "transferByNode": {
+        "node-churn-v1": 102400,
+        "node-empty": 112640,
+        "node-hello": 102400
+      },
+      "transferMin": 102400,
+      "transferMax": 112640
+    }
+  ],
+  "overhead": {
+    "diffID": "sha256:f003e077fcffe7c286bb778c1514ebe6c7388d057e705b8bc43d6be413837a43",
+    "size": 10240,
+    "gzipSize": 101
+  }
+}

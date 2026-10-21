@@ -20,8 +20,9 @@ for the acceptance checklist and measured results, and
   and `POST /v1/origin_probe` to measure it
 - A three-node k3d smoke and a demo on the real closures
 
-The scheduler extender (`cmd/extender`) and the bench (`cmd/bench`) are
-Phase 2 and 3 stubs. Nothing fetches store paths on a pod start yet.
+The scheduler extender (`cmd/extender`) is a Phase 2 stub. The bench
+(`cmd/bench`) implements the byte comparison. Nothing fetches store paths on a
+pod start yet.
 
 ## Layout
 
@@ -45,10 +46,16 @@ nix build .#k3snix
 nix run .#agent
 hack/e2e-k3d.sh             # three-node k3d smoke (needs Docker)
 hack/demo-real-closures.sh  # missing bytes and NAR parity on the real closures
+nix build .#comparison      # store paths vs OCI layers on the same workloads
+nix develop -c bash hack/k3s-docker-live.sh # k3snix rule vs real K3s + Docker, fine/coarse
+nix develop -c bash hack/compare-live.sh    # supporting nix copy / docker pull validation
 ```
 
+[docs/comparison.md](docs/comparison.md) describes the k3snix versus normal
+K3s with Docker comparison, its method, live results and limitations.
+
 The dev shell provides Go, k3d, k3s, kubectl, minikube, the Docker client, jq,
-and Python.
+skopeo, and Python.
 
 ## Dependencies
 

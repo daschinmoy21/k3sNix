@@ -1,0 +1,845 @@
+{
+  "source": "kubectl get nodes -o json; seed snapshots used for floor check",
+  "runs": [
+    {
+      "run": 1,
+      "firstRegisteredState": "node-churn-v1",
+      "assignment": {
+        "node-worker-1": "node-churn-v1",
+        "node-worker-2": "node-hello",
+        "node-worker-3": "node-empty"
+      },
+      "registrationOrder": [
+        "node-control",
+        "node-worker-1",
+        "node-worker-2",
+        "node-worker-3"
+      ],
+      "nodes": [
+        {
+          "name": "node-control",
+          "creationTimestamp": "2026-10-21T16:28:40Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [
+            {
+              "effect": "NoSchedule",
+              "key": "node-role.kubernetes.io/control-plane"
+            }
+          ],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-1",
+          "creationTimestamp": "2026-10-21T16:29:09Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1@sha256:e96ca4e344426bd5e13ad44a103d0d6f2d29312a180a229f2f0d48f6ba8ece5d",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1:fine"
+              ],
+              "sizeBytes": 8464646
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-2",
+          "creationTimestamp": "2026-10-21T16:29:41Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a@sha256:3029e4f4584c79aa0e975cd17772113bc4c19d60b0d608f45842df0acdae1d94",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a:fine"
+              ],
+              "sizeBytes": 54495811
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-3",
+          "creationTimestamp": "2026-10-21T16:30:13Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "firstRegisteredState": "node-hello",
+      "assignment": {
+        "node-worker-1": "node-hello",
+        "node-worker-2": "node-empty",
+        "node-worker-3": "node-churn-v1"
+      },
+      "registrationOrder": [
+        "node-control",
+        "node-worker-1",
+        "node-worker-2",
+        "node-worker-3"
+      ],
+      "nodes": [
+        {
+          "name": "node-control",
+          "creationTimestamp": "2026-10-21T16:28:40Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [
+            {
+              "effect": "NoSchedule",
+              "key": "node-role.kubernetes.io/control-plane"
+            }
+          ],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-1",
+          "creationTimestamp": "2026-10-21T16:29:09Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a@sha256:3029e4f4584c79aa0e975cd17772113bc4c19d60b0d608f45842df0acdae1d94",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a:fine"
+              ],
+              "sizeBytes": 54495811
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-2",
+          "creationTimestamp": "2026-10-21T16:29:41Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-3",
+          "creationTimestamp": "2026-10-21T16:30:13Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1@sha256:e96ca4e344426bd5e13ad44a103d0d6f2d29312a180a229f2f0d48f6ba8ece5d",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1:fine"
+              ],
+              "sizeBytes": 8464646
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "firstRegisteredState": "node-empty",
+      "assignment": {
+        "node-worker-1": "node-empty",
+        "node-worker-2": "node-churn-v1",
+        "node-worker-3": "node-hello"
+      },
+      "registrationOrder": [
+        "node-control",
+        "node-worker-1",
+        "node-worker-2",
+        "node-worker-3"
+      ],
+      "nodes": [
+        {
+          "name": "node-control",
+          "creationTimestamp": "2026-10-21T16:28:40Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [
+            {
+              "effect": "NoSchedule",
+              "key": "node-role.kubernetes.io/control-plane"
+            }
+          ],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-1",
+          "creationTimestamp": "2026-10-21T16:29:09Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-2",
+          "creationTimestamp": "2026-10-21T16:29:41Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1@sha256:e96ca4e344426bd5e13ad44a103d0d6f2d29312a180a229f2f0d48f6ba8ece5d",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1:fine"
+              ],
+              "sizeBytes": 8464646
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-3",
+          "creationTimestamp": "2026-10-21T16:30:13Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a@sha256:3029e4f4584c79aa0e975cd17772113bc4c19d60b0d608f45842df0acdae1d94",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a:fine"
+              ],
+              "sizeBytes": 54495811
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        }
+      ]
+    },
+    {
+      "run": 4,
+      "firstRegisteredState": "node-churn-v1",
+      "assignment": {
+        "node-worker-1": "node-churn-v1",
+        "node-worker-2": "node-hello",
+        "node-worker-3": "node-empty"
+      },
+      "registrationOrder": [
+        "node-control",
+        "node-worker-1",
+        "node-worker-2",
+        "node-worker-3"
+      ],
+      "nodes": [
+        {
+          "name": "node-control",
+          "creationTimestamp": "2026-10-21T16:28:40Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [
+            {
+              "effect": "NoSchedule",
+              "key": "node-role.kubernetes.io/control-plane"
+            }
+          ],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-1",
+          "creationTimestamp": "2026-10-21T16:29:09Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1@sha256:e96ca4e344426bd5e13ad44a103d0d6f2d29312a180a229f2f0d48f6ba8ece5d",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1:fine"
+              ],
+              "sizeBytes": 8464646
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-2",
+          "creationTimestamp": "2026-10-21T16:29:41Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a@sha256:3029e4f4584c79aa0e975cd17772113bc4c19d60b0d608f45842df0acdae1d94",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a:fine"
+              ],
+              "sizeBytes": 54495811
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-3",
+          "creationTimestamp": "2026-10-21T16:30:13Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        }
+      ]
+    },
+    {
+      "run": 5,
+      "firstRegisteredState": "node-hello",
+      "assignment": {
+        "node-worker-1": "node-hello",
+        "node-worker-2": "node-empty",
+        "node-worker-3": "node-churn-v1"
+      },
+      "registrationOrder": [
+        "node-control",
+        "node-worker-1",
+        "node-worker-2",
+        "node-worker-3"
+      ],
+      "nodes": [
+        {
+          "name": "node-control",
+          "creationTimestamp": "2026-10-21T16:28:40Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [
+            {
+              "effect": "NoSchedule",
+              "key": "node-role.kubernetes.io/control-plane"
+            }
+          ],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-1",
+          "creationTimestamp": "2026-10-21T16:29:09Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a@sha256:3029e4f4584c79aa0e975cd17772113bc4c19d60b0d608f45842df0acdae1d94",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a:fine"
+              ],
+              "sizeBytes": 54495811
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-2",
+          "creationTimestamp": "2026-10-21T16:29:41Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-3",
+          "creationTimestamp": "2026-10-21T16:30:13Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1@sha256:e96ca4e344426bd5e13ad44a103d0d6f2d29312a180a229f2f0d48f6ba8ece5d",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1:fine"
+              ],
+              "sizeBytes": 8464646
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        }
+      ]
+    },
+    {
+      "run": 6,
+      "firstRegisteredState": "node-empty",
+      "assignment": {
+        "node-worker-1": "node-empty",
+        "node-worker-2": "node-churn-v1",
+        "node-worker-3": "node-hello"
+      },
+      "registrationOrder": [
+        "node-control",
+        "node-worker-1",
+        "node-worker-2",
+        "node-worker-3"
+      ],
+      "nodes": [
+        {
+          "name": "node-control",
+          "creationTimestamp": "2026-10-21T16:28:40Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [
+            {
+              "effect": "NoSchedule",
+              "key": "node-role.kubernetes.io/control-plane"
+            }
+          ],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-1",
+          "creationTimestamp": "2026-10-21T16:29:09Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-2",
+          "creationTimestamp": "2026-10-21T16:29:41Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1@sha256:e96ca4e344426bd5e13ad44a103d0d6f2d29312a180a229f2f0d48f6ba8ece5d",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/churn-v1:fine"
+              ],
+              "sizeBytes": 8464646
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        },
+        {
+          "name": "node-worker-3",
+          "creationTimestamp": "2026-10-21T16:30:13Z",
+          "runtime": "docker://29.9.1",
+          "kubelet": "v1.36.4+k3s1",
+          "allocatable": {
+            "cpu": "20",
+            "ephemeral-storage": "501081201476",
+            "hugepages-1Gi": "0",
+            "hugepages-2Mi": "0",
+            "memory": "16086732Ki",
+            "pods": "110"
+          },
+          "taints": [],
+          "images": [
+            {
+              "names": [
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a@sha256:3029e4f4584c79aa0e975cd17772113bc4c19d60b0d608f45842df0acdae1d94",
+                "k3snix-k3sd-tmp.Ug8XId0aBg-registry:5000/k3snix-oci/share-a:fine"
+              ],
+              "sizeBytes": 54495811
+            },
+            {
+              "names": [
+                "rancher/mirrored-pause@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4",
+                "rancher/mirrored-pause:3.10.2"
+              ],
+              "sizeBytes": 1059419
+            }
+          ],
+          "ready": true,
+          "unschedulable": false
+        }
+      ]
+    }
+  ]
+}

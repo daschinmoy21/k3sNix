@@ -1,0 +1,22 @@
+{
+  "fine": {
+    "churn-v1": 8464646,
+    "churn-v2": 8690858,
+    "churn-v3": 8990865,
+    "churn-v4": 9372872,
+    "share-a": 54495811,
+    "share-b": 72453458,
+    "unrelated-a": 83753,
+    "unrelated-b": 116536
+  },
+  "coarse": {
+    "churn-v1": 8439072,
+    "churn-v2": 8652568,
+    "churn-v3": 8939877,
+    "churn-v4": 9309211,
+    "share-a": 54437575,
+    "share-b": 72336186,
+    "unrelated-a": 83753,
+    "unrelated-b": 116536
+  }
+}

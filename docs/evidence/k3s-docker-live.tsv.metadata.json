@@ -1,0 +1,22 @@
+{
+  "measuredAt": "2026-10-21T17:24:24+00:00",
+  "k3s": "v1.36.4+k3s1",
+  "hostDocker": "29.8.1",
+  "model": "/nix/store/4zz3dcw7z6idn0s9w02dz6chibq0g306-store-path-vs-layer-comparison",
+  "commit": "6e05d975fbb4b88d104e8de9a25c79cd89f1cee1",
+  "gitStatusPorcelain": "M  README.md\nM  cmd/bench/main.go\nAM docs/comparison.md\nA  docs/evidence/compare-live.tsv\nAM docs/evidence/k3s-docker-live.tsv\nA  docs/evidence/k3s-docker-live.tsv.metadata.json\nA  docs/evidence/k3s-docker-live.tsv.nodes-coarse.json\nA  docs/evidence/k3s-docker-live.tsv.nodes-fine.json\nA  docs/evidence/k3s-docker-live.tsv.summary.md\nM  flake.nix\nA  hack/compare-live.sh\nA  hack/k3s-docker-live.sh\nA  hack/lib/compare-live.sh\nA  hack/summarize-k3s-docker.py\nA  internal/compare/compare.go\nA  internal/compare/compare_test.go\nA  internal/compare/report.go\nA  internal/oci/oci.go\nA  internal/oci/oci_test.go\nM  nix/closures.nix\nA  nix/comparison.nix\nA  nix/images.nix\nA  nix/workloads.nix",
+  "unstagedDiffSHA256": "73b7aaaae2d432af171d9f6582e6275800d7af2cfa24c5cebc2a1b15f7199f48",
+  "stagedDiffSHA256": "cabeb5dffcd01a33e07832c293b4e424172378a3ae7756c2d17d398cf647f6d9",
+  "scriptSHA256": "acb243c0d78ad28fd70f5ec598fdc6945b8d224069f424c460a6fb9065254481",
+  "runs": 6,
+  "pinnedRuns": 1,
+  "totalNodes": 4,
+  "rotation": "seed assignment rotates across workers in verified creationTimestamp order",
+  "imageSizeSource": "Docker image inspect .Size, cross-checked against Node.status.images.sizeBytes",
+  "postRunAnnotations": {
+    "source": "user report in conversation during the run",
+    "hostActivity": "Overwatch running during part of the run",
+    "approxOverallCPUPercent": 17,
+    "hostUtilizationRecordedByHarness": false
+  }
+}
