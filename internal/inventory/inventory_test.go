@@ -184,3 +184,22 @@ func TestSkipsPathsNixIsWriting(t *testing.T) {
 		t.Fatalf("after unlock: have %d paths, missing %d bytes; want 2, 40", m.HavePaths, m.MissingBytes)
 	}
 }
+
+func TestReadOnlyLockNamedPathIsAPath(t *testing.T) {
+	// A fetched Cargo.lock is a store path whose name ends in ".lock". Nix
+	// leaves it read-only, unlike the writable lock files it holds.
+	dir := t.TempDir()
+	const name = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-Cargo.lock"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("12345"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	s.TTL = 0
+
+	if got := s.Count(); got != 1 {
+		t.Fatalf("count = %d, want 1: a read-only *.lock is a store path", got)
+	}
+	if got, want := s.LookupHash("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"), filepath.Join(dir, name); got != want {
+		t.Fatalf("LookupHash = %q, want %q", got, want)
+	}
+}
