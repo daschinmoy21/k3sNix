@@ -14,12 +14,18 @@
 #   none of the fixture. Nothing fetches on pod start: the agent only ever
 #   serves bytes a client asks for.
 #
+# Origin: a k3snix-agent over the host store in -catalog-only mode, with the
+# pinned closure manifests as its catalog (ConfigMap k3snix-origin-catalog),
+# so it serves exactly the closures it is preloaded with. Its narinfo is
+# signed with a key generated per run (Secret k3snix-origin-key), and the
+# smoke has real nix verify the churn-v1 closure against the public key.
+#
 # Fallback: if the cluster cannot be created with the /nix/store volume, the
 # script runs the built k3snix-agent on the host at 0.0.0.0:9877 with
-# -store /nix/store, skips deploy/20-origin.yaml, and points the DaemonSet
-# origin URL at http://host.k3d.internal:9877 instead. The assertion that a
-# real churn-v1 path's narinfo returns 200 still runs, against the host
-# agent; it is never dropped.
+# -store /nix/store and the same catalog and key, skips
+# deploy/20-origin.yaml, and points the DaemonSet origin URL at
+# http://host.k3d.internal:9877 instead. Every origin assertion still runs,
+# against the host agent; none is dropped.
 #
 # Catalog: the smoke creates the catalog ConfigMap from the fixture before
 # applying the manifests (this is the single documented command for it):
@@ -71,6 +77,17 @@ if [ -z "$CLOSURES_DIR" ]; then
 fi
 [ -f "$CLOSURES_DIR/manifests/churn-v1.json" ] || fail "no manifests/churn-v1.json under $CLOSURES_DIR"
 
+# The largest churn-v1 path: what the origin NAR probe and preload checks use.
+churn_path=$(jq -r '.paths | max_by(.narSize) | .path' "$CLOSURES_DIR/manifests/churn-v1.json")
+churn_size=$(jq -r '.paths | max_by(.narSize) | .narSize' "$CLOSURES_DIR/manifests/churn-v1.json")
+churn_root=$(jq -r '.root' "$CLOSURES_DIR/manifests/churn-v1.json")
+churn_hash=$(basename "$churn_path" | cut -c1-32)
+[ "${#churn_hash}" -eq 32 ] || fail "bad churn-v1 hash prefix '$churn_hash'"
+
+echo "== nix key generate-secret (origin narinfo signing key)"
+nix key generate-secret --key-name k3snix-origin-1 >"$tmp/origin.key"
+origin_pub=$(nix key convert-secret-to-public <"$tmp/origin.key")
+
 echo "== docker load $IMAGE_TAR (tag k3snix:dev)"
 docker load -i "$IMAGE_TAR"
 
@@ -100,6 +117,7 @@ if [ "$FALLBACK" = 1 ]; then
   echo "== nix build .#k3snix (host origin agent)"
   nix build .#k3snix -o "$tmp/result-bin"
   "$tmp/result-bin/bin/k3snix-agent" -listen 0.0.0.0:9877 -store /nix/store \
+    -catalog "$CLOSURES_DIR/manifests" -catalog-only -sign-key-file "$tmp/origin.key" \
     >"$tmp/host-agent.log" 2>&1 &
   host_agent_pid=$!
 fi
@@ -128,6 +146,8 @@ kubectl -n kube-system rollout status deployment/coredns --timeout=120s
 echo "== applying manifests"
 kubectl apply -f deploy/00-namespace.yaml
 kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json="$FIXTURE"
+kubectl -n k3snix create configmap k3snix-origin-catalog --from-file="$CLOSURES_DIR/manifests/"
+kubectl -n k3snix create secret generic k3snix-origin-key --from-file=secret-key="$tmp/origin.key"
 if [ "$FALLBACK" = 1 ]; then
   sed 's#http://k3snix-origin.k3snix.svc.cluster.local:9877#http://host.k3d.internal:9877#' \
     deploy/10-agent-daemonset.yaml >"$tmp/agent-ds.yaml"
@@ -286,13 +306,26 @@ req=$(metric "$cold_pod" k3snix_origin_requests)
 obytes=$(metric "$cold_pod" k3snix_origin_bytes)
 [ "$req" -ge 1 ] || fail "k3snix_origin_requests $req after probe, want >= 1"
 [ "$obytes" -gt 0 ] || fail "k3snix_origin_bytes $obytes after probe, want > 0"
-echo "  k3snix_origin_requests=$req k3snix_origin_bytes=$obytes"
+echo "  cache-info probe: k3snix_origin_requests=$req k3snix_origin_bytes=$obytes"
+
+# A NAR probe moves real NAR bytes: the cold agent downloads the churn-v1
+# path from the origin, verifies it against the narinfo and discards it.
+resp=$(probe "$cold_pod" http://127.0.0.1:9860/v1/origin_probe "{\"hash\":\"$churn_hash\"}") \
+  || fail "NAR origin probe for $churn_path failed"
+[ "$(jq -r '.verified' <<<"$resp")" = "true" ] || fail "NAR origin probe not verified: $resp"
+[ "$(jq -r '.nar_size' <<<"$resp")" = "$churn_size" ] ||
+  fail "NAR origin probe nar_size $(jq -r '.nar_size' <<<"$resp"), manifest narSize $churn_size"
+req2=$(metric "$cold_pod" k3snix_origin_requests)
+obytes2=$(metric "$cold_pod" k3snix_origin_bytes)
+[ "$req2" -eq $((req + 2)) ] || fail "k3snix_origin_requests $req2 after NAR probe, want $((req + 2))"
+[ $((obytes2 - obytes)) -ge "$churn_size" ] ||
+  fail "k3snix_origin_bytes grew by $((obytes2 - obytes)), want >= narSize $churn_size"
+echo "  NAR probe: $(basename "$churn_path") verified, k3snix_origin_bytes=$obytes2 (+$((obytes2 - obytes)))"
+[ "$(metric "$cold_pod" k3snix_store_paths)" = "0" ] || fail "NAR probe materialized paths on the cold node"
 
 # --- origin preload ---------------------------------------------------------
 
-echo "== origin preload for a real churn-v1 path"
-churn_hash=$(jq -r '.paths[0].path' "$CLOSURES_DIR/manifests/churn-v1.json" | awk -F/ '{print $NF}' | cut -c1-32)
-[ "${#churn_hash}" -eq 32 ] || fail "bad churn-v1 hash prefix '$churn_hash'"
+echo "== origin preload for the pinned churn-v1 closure"
 
 if [ "$FALLBACK" = 0 ]; then
   kubectl -n k3snix port-forward svc/k3snix-origin 19877:9877 >/dev/null 2>&1 &
@@ -309,6 +342,24 @@ code=$(get_code "$origin_base/nix-cache-info")
 code=$(get_code "$origin_base/${churn_hash}.narinfo")
 [ "$code" = "200" ] || fail "$origin_base/${churn_hash}.narinfo -> $code (churn-v1 path must be served)"
 echo "  /nix-cache-info and /${churn_hash}.narinfo both 200"
+
+# Real nix checks signatures and NAR contents for the whole closure. The
+# key is new every run but the origin URL is not, so nix's narinfo cache
+# would replay the previous run's signatures; a zero TTL bypasses it.
+nix store verify --store "$origin_base" --trusted-public-keys "$origin_pub" \
+  --option narinfo-cache-positive-ttl 0 -r "$churn_root" \
+  >"$tmp/verify.log" 2>&1 || { cat "$tmp/verify.log" >&2; fail "nix store verify of $churn_root against the origin"; }
+echo "  nix store verify: churn-v1 closure signed by $(cut -d: -f1 <<<"$origin_pub") and content-checked"
+
+# Preloaded means only the pinned closures: a host store path outside the
+# catalog is not served even though the origin can see it.
+# The closure-manifests output itself is such a path.
+outside_path=$(readlink -f "$CLOSURES_DIR")
+case "$outside_path" in /nix/store/*) ;; *) fail "closures dir '$outside_path' is not a store path" ;; esac
+outside=$(basename "$outside_path" | cut -c1-32)
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$origin_base/${outside}.narinfo")
+[ "$code" = "404" ] || fail "$origin_base/${outside}.narinfo -> $code, want 404 for a path outside the catalog"
+echo "  /${outside}.narinfo ($(basename "$outside_path"), not in the catalog) 404"
 
 if [ -n "$pf_pid" ]; then
   kill "$pf_pid" >/dev/null 2>&1 || true

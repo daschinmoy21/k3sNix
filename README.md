@@ -8,7 +8,20 @@ live in the BTech report.
 
 ## Status
 
-Skeleton. The three entry points exist and build; no behaviour is implemented yet.
+Phase 1, the data plane, is complete; see [docs/phase1.md](docs/phase1.md)
+for the acceptance checklist and measured results, and
+[docs/phases.md](docs/phases.md) for the roadmap.
+
+- Pinned workload closures (churn ladder, glibc-sharing pair, unrelated
+  pair) with manifests, content-derived closure IDs and a catalog
+- `k3snix-agent` per node: store inventory, `POST /v1/missing_bytes`, and a
+  Nix binary cache (`/nix-cache-info`, `*.narinfo`, `nar/*.nar`) for peers
+- A LAN origin cache: the agent in `-catalog-only` mode with signed narinfo,
+  and `POST /v1/origin_probe` to measure it
+- A three-node k3d smoke and a demo on the real closures
+
+The scheduler extender (`cmd/extender`) and the bench (`cmd/bench`) are
+Phase 2 and 3 stubs. Nothing fetches store paths on a pod start yet.
 
 ## Layout
 
@@ -30,6 +43,8 @@ Everything is pinned by the flake. Run `direnv allow` to load the dev shell, or
 go test ./...
 nix build .#k3snix
 nix run .#agent
+hack/e2e-k3d.sh             # three-node k3d smoke (needs Docker)
+hack/demo-real-closures.sh  # missing bytes and NAR parity on the real closures
 ```
 
 The dev shell provides Go, k3d, k3s, kubectl, minikube, the Docker client, jq,

@@ -153,3 +153,53 @@ func TestDefaultDir(t *testing.T) {
 		t.Fatalf("default ttl = %v", got)
 	}
 }
+
+func TestSkipsPathsNixIsWriting(t *testing.T) {
+	dir := t.TempDir()
+	seed(t, dir, []string{
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a",
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b",
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.lock", // b is still being written
+		"dddddddddddddddddddddddddddddddd-d.lock", // lock before the path appears
+	})
+	s := New(dir)
+	s.TTL = 0
+
+	m := s.Missing(testClosure())
+	if m.HavePaths != 1 || m.MissingBytes != 60 {
+		t.Fatalf("have %d paths, missing %d bytes; want 1 path, 60 bytes (b and c missing)", m.HavePaths, m.MissingBytes)
+	}
+	if got := s.Count(); got != 1 {
+		t.Fatalf("count = %d, want 1: lock files and locked paths are not store paths", got)
+	}
+	if got := s.LookupHash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); got != "" {
+		t.Fatalf("LookupHash served a locked path: %q", got)
+	}
+
+	// Once nix registers b and drops the lock, b counts.
+	if err := os.Remove(filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if m := s.Missing(testClosure()); m.HavePaths != 2 || m.MissingBytes != 40 {
+		t.Fatalf("after unlock: have %d paths, missing %d bytes; want 2, 40", m.HavePaths, m.MissingBytes)
+	}
+}
+
+func TestReadOnlyLockNamedPathIsAPath(t *testing.T) {
+	// A fetched Cargo.lock is a store path whose name ends in ".lock". Nix
+	// leaves it read-only, unlike the writable lock files it holds.
+	dir := t.TempDir()
+	const name = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-Cargo.lock"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("12345"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	s.TTL = 0
+
+	if got := s.Count(); got != 1 {
+		t.Fatalf("count = %d, want 1: a read-only *.lock is a store path", got)
+	}
+	if got, want := s.LookupHash("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"), filepath.Join(dir, name); got != want {
+		t.Fatalf("LookupHash = %q, want %q", got, want)
+	}
+}

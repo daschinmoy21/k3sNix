@@ -12,6 +12,10 @@ import (
 	"k3snix/internal/closure"
 )
 
+// lockSuffix marks the lock file nix holds beside a store path it is
+// writing.
+const lockSuffix = ".lock"
+
 // Store is a cached listing of a Nix store directory.
 type Store struct {
 	Dir string
@@ -38,11 +42,35 @@ func New(dir string) *Store {
 }
 
 // Refresh rescans the store directory. Keys are full paths. Entries whose
-// name starts with "." are skipped. Scans run one at a time.
+// name starts with "." are skipped, and so are paths nix is still writing:
+// nix holds "<path>.lock" while it builds or substitutes <path> and deletes
+// it once the path is registered, so a path with a lock beside it may be
+// half-written. The lock files themselves are never paths, but a read-only
+// store path named "*.lock" is (see isLock). A lock left by a
+// crashed nix keeps its path out of the have-set, which over-reports missing
+// bytes rather than claiming bytes the node may not hold. Scans run one at a
+// time.
 func (s *Store) Refresh() error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	return s.refresh()
+}
+
+// isLock reports whether e is a lock file nix holds rather than a store path
+// whose name happens to end in ".lock", such as a fetched Cargo.lock. Nix
+// creates its locks writable by their owner; a registered store path has
+// been made read-only.
+func isLock(e os.DirEntry) bool {
+	if !strings.HasSuffix(e.Name(), lockSuffix) || !e.Type().IsRegular() {
+		return false
+	}
+	info, err := e.Info()
+	if err != nil {
+		// Removed since ReadDir: nix just released it. Treat it as held
+		// for this scan; the next one sees the path unlocked.
+		return true
+	}
+	return info.Mode().Perm()&0o200 != 0
 }
 
 func (s *Store) refresh() error {
@@ -50,11 +78,25 @@ func (s *Store) refresh() error {
 	if err != nil {
 		return err
 	}
+	locks := map[string]struct{}{}  // lock file names
+	locked := map[string]struct{}{} // names of the paths they lock
+	for _, e := range ents {
+		if isLock(e) {
+			locks[e.Name()] = struct{}{}
+			locked[strings.TrimSuffix(e.Name(), lockSuffix)] = struct{}{}
+		}
+	}
 	have := make(map[string]struct{}, len(ents))
 	byHash := make(map[string]string, len(ents))
 	for _, e := range ents {
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if _, ok := locks[name]; ok {
+			continue
+		}
+		if _, ok := locked[name]; ok {
 			continue
 		}
 		path := filepath.Join(s.Dir, name)

@@ -69,3 +69,13 @@ func (c *Catalog) ByLabel(label string) (Closure, bool) {
 	cl.Label = label
 	return cl, true
 }
+
+// Closures returns every distinct closure in the catalog, one per
+// fingerprint, in no particular order.
+func (c *Catalog) Closures() []Closure {
+	out := make([]Closure, 0, len(c.byFingerprint))
+	for _, cl := range c.byFingerprint {
+		out = append(out, cl)
+	}
+	return out
+}

@@ -59,17 +59,32 @@ type Server struct {
 	// defaultMaxRequestBytes.
 	MaxRequestBytes int64
 
-	// closures mirrors the catalog contents so narinfo can find references
-	// for a store path without enumerating the Catalog's private indexes.
-	closures []closure.Closure
+	// MaxOriginNARBytes caps the NAR a /v1/origin_probe may download; a
+	// narinfo announcing a larger NarSize is refused before the transfer.
+	// Zero means defaultMaxOriginNARBytes.
+	MaxOriginNARBytes int64
 
-	mu             sync.Mutex
-	dumps          map[string]*dumpCall
-	dumpBytes      int64 // total size of the finished dumps in dumps
-	narServed      int64
-	bytesServed    int64
-	originRequests int64
-	originBytes    int64
+	// CatalogOnly restricts narinfo and NAR serving to store paths the
+	// catalog describes, so an origin backed by a whole host store serves
+	// only the pinned closures it was preloaded with.
+	CatalogOnly bool
+
+	// SignKey, when set, adds a nix Sig line to every narinfo.
+	SignKey *SigningKey
+
+	// catalogPaths maps a store basename to its catalog entry, so narinfo
+	// and NAR serving can find references, narHash and narSize for a path.
+	catalogPaths map[string]closure.Path
+
+	mu                   sync.Mutex
+	dumps                map[string]*dumpCall
+	dumpBytes            int64 // total size of the finished dumps in dumps
+	narServed            int64
+	bytesServed          int64
+	narHashMismatches    int64
+	originRequests       int64
+	originBytes          int64
+	originVerifyFailures int64
 }
 
 // dumpResult is a finished NAR dump kept on disk so waiters can copy the
@@ -115,26 +130,24 @@ func (s *Server) LoadCatalog(dir string) error {
 		return err
 	}
 	s.Catalog = cat
-
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
+	s.catalogPaths = map[string]closure.Path{}
+	for _, c := range cat.Closures() {
+		for _, p := range c.Paths {
+			base := filepath.Base(p.Path)
+			// Closures share paths; keep an entry that carries a hash.
+			if prev, ok := s.catalogPaths[base]; ok && prev.NarHashNix32() != "" {
+				continue
+			}
+			s.catalogPaths[base] = p
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			return err
-		}
-		c, err := closure.Parse(data)
-		if err != nil {
-			return fmt.Errorf("parse %s: %w", e.Name(), err)
-		}
-		s.closures = append(s.closures, c)
 	}
 	return nil
+}
+
+// catalogPath returns the catalog entry for a local store path.
+func (s *Server) catalogPath(path string) (closure.Path, bool) {
+	p, ok := s.catalogPaths[filepath.Base(path)]
+	return p, ok
 }
 
 // Handler returns the agent's HTTP routes.
@@ -158,13 +171,16 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	narServed, bytesServed := s.narServed, s.bytesServed
 	originRequests, originBytes := s.originRequests, s.originBytes
+	mismatches, verifyFailures := s.narHashMismatches, s.originVerifyFailures
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, "k3snix_nar_served %d\n", narServed)
 	fmt.Fprintf(w, "k3snix_nar_bytes_served %d\n", bytesServed)
+	fmt.Fprintf(w, "k3snix_nar_hash_mismatches %d\n", mismatches)
 	fmt.Fprintf(w, "k3snix_store_paths %d\n", s.Store.Count())
 	fmt.Fprintf(w, "k3snix_origin_requests %d\n", originRequests)
 	fmt.Fprintf(w, "k3snix_origin_bytes %d\n", originBytes)
+	fmt.Fprintf(w, "k3snix_origin_verify_failures %d\n", verifyFailures)
 }
 
 // defaultMaxRequestBytes applies when Server.MaxRequestBytes is unset.
@@ -184,7 +200,7 @@ type MissingResp struct {
 	TotalBytes uint64   `json:"total_bytes"`
 	HavePaths  int      `json:"have_paths"`
 	TotalPaths int      `json:"total_paths"`
-	EstimateMS float64  `json:"estimate_ms"`
+	ComputeMS  float64  `json:"compute_ms"` // time spent computing this answer, not a transfer estimate
 	Missing    []string `json:"missing"`
 }
 
@@ -246,7 +262,7 @@ func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
 		TotalBytes: m.TotalBytes,
 		HavePaths:  m.HavePaths,
 		TotalPaths: m.TotalPaths,
-		EstimateMS: float64(time.Since(start).Microseconds()) / 1000,
+		ComputeMS:  float64(time.Since(start).Microseconds()) / 1000,
 		Missing:    m.MissingPaths,
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -289,28 +305,49 @@ func validStoreHash(s string) bool {
 	return len(s) == 32 && nixbase32.IsValid(s)
 }
 
+// serveNarinfo answers from the catalog when it records the path's narHash
+// and narSize, so a narinfo request never costs a dump; serveNAR then
+// refuses any dump that disagrees with those values. Paths the catalog does
+// not describe are dumped and described by the dump itself.
 func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash string) {
 	path := s.Store.LookupHash(hash)
 	if path == "" {
 		http.NotFound(w, r)
 		return
 	}
-	res, release, err := s.dumpCoalesced(path)
-	defer release()
-	if err != nil {
-		s.logError("narinfo", path, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	meta, inCatalog := s.catalogPath(path)
+	if s.CatalogOnly && !inCatalog {
+		http.NotFound(w, r)
 		return
 	}
+	narHash, narSize := meta.NarHashNix32(), int64(meta.NarSize)
+	if narHash == "" || narSize == 0 {
+		res, release, err := s.dumpCoalesced(path)
+		defer release()
+		if err != nil {
+			s.logError("narinfo", path, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		narHash, narSize = res.hash, res.size
+	}
+	refs := s.references(path)
 	w.Header().Set("Content-Type", "text/x-nix-narinfo")
 	fmt.Fprintf(w, "StorePath: %s\n", path)
 	fmt.Fprintf(w, "URL: nar/%s.nar\n", hash)
 	fmt.Fprintf(w, "Compression: none\n")
-	fmt.Fprintf(w, "FileHash: sha256:%s\n", res.hash)
-	fmt.Fprintf(w, "FileSize: %d\n", res.size)
-	fmt.Fprintf(w, "NarHash: sha256:%s\n", res.hash)
-	fmt.Fprintf(w, "NarSize: %d\n", res.size)
-	fmt.Fprintf(w, "References: %s\n", strings.Join(s.references(path), " "))
+	fmt.Fprintf(w, "FileHash: sha256:%s\n", narHash)
+	fmt.Fprintf(w, "FileSize: %d\n", narSize)
+	fmt.Fprintf(w, "NarHash: sha256:%s\n", narHash)
+	fmt.Fprintf(w, "NarSize: %d\n", narSize)
+	fmt.Fprintf(w, "References: %s\n", strings.Join(refs, " "))
+	if s.SignKey != nil {
+		full := make([]string, len(refs))
+		for i, ref := range refs {
+			full[i] = filepath.Join(s.Store.Dir, ref)
+		}
+		fmt.Fprintf(w, "Sig: %s\n", s.SignKey.Sign(path, "sha256:"+narHash, narSize, full))
+	}
 }
 
 func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
@@ -319,11 +356,26 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 		http.NotFound(w, r)
 		return
 	}
+	meta, inCatalog := s.catalogPath(path)
+	if s.CatalogOnly && !inCatalog {
+		http.NotFound(w, r)
+		return
+	}
 	res, release, err := s.dumpCoalesced(path)
 	defer release()
 	if err != nil {
 		s.logError("nar", path, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if want := meta.NarHashNix32(); want != "" &&
+		(res.hash != want || (meta.NarSize != 0 && res.size != int64(meta.NarSize))) {
+		s.mu.Lock()
+		s.narHashMismatches++
+		s.mu.Unlock()
+		s.logError("nar", path, fmt.Errorf("dump is sha256:%s (%d bytes), catalog says sha256:%s (%d bytes)",
+			res.hash, res.size, want, meta.NarSize))
+		http.Error(w, "NAR does not match the catalog narHash", http.StatusInternalServerError)
 		return
 	}
 	f, err := os.Open(res.file)
@@ -475,32 +527,22 @@ func (s *Server) dumpOnce(path string) (dumpResult, error) {
 	return dumpResult{file: name, size: size, hash: nixbase32.EncodeToString(h.Sum(nil))}, nil
 }
 
-// references returns the basenames a store path refers to: from the catalog
-// when the path appears there, else from nix-store, else nothing.
+// references returns the sorted basenames a store path refers to: from the
+// catalog when the path appears there, else from nix-store, else nothing.
 func (s *Server) references(path string) []string {
-	base := filepath.Base(path)
-	for _, c := range s.closures {
-		for _, p := range c.Paths {
-			if filepath.Base(p.Path) != base {
-				continue
-			}
-			refs := make([]string, 0, len(p.References))
-			for _, ref := range p.References {
-				refs = append(refs, filepath.Base(ref))
-			}
-			return refs
-		}
-	}
-	out, err := exec.Command("nix-store", "-q", "--references", path).Output()
-	if err != nil {
-		return nil
-	}
 	var refs []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			refs = append(refs, filepath.Base(line))
+	if p, ok := s.catalogPath(path); ok {
+		for _, ref := range p.References {
+			refs = append(refs, filepath.Base(ref))
+		}
+	} else if out, err := exec.Command("nix-store", "-q", "--references", path).Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				refs = append(refs, filepath.Base(line))
+			}
 		}
 	}
+	sort.Strings(refs)
 	return refs
 }
 

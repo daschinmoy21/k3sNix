@@ -30,6 +30,9 @@ func main() {
 		probeURL   = flag.String("probe-url", "", "one-shot client: GET this URL (POST with -probe-body), print the response body, exit")
 		probeBody  = flag.String("probe-body", "", "request body for -probe-url; empty body sends GET")
 		maxReqBody = flag.Int64("max-request-bytes", 16<<20, "cap on a /v1/missing_bytes request body")
+		originNAR  = flag.Int64("origin-max-nar-bytes", 1<<30, "cap on the NAR a /v1/origin_probe may download")
+		catOnly    = flag.Bool("catalog-only", false, "serve narinfo and NARs only for store paths in the catalog")
+		signKey    = flag.String("sign-key-file", "", "nix secret key file used to sign narinfo (nix key generate-secret)")
 	)
 	flag.Parse()
 
@@ -43,6 +46,19 @@ func main() {
 	s.DumpTTL = *dumpTTL
 	s.MaxDumpBytes = *dumpBytes
 	s.Origin = *origin
+	s.MaxOriginNARBytes = *originNAR
+	if *catOnly && *catalog == "" {
+		log.Fatal("-catalog-only requires -catalog")
+	}
+	s.CatalogOnly = *catOnly
+	if *signKey != "" {
+		key, err := agent.LoadSigningKey(*signKey)
+		if err != nil {
+			log.Fatalf("sign key %s: %v", *signKey, err)
+		}
+		s.SignKey = key
+		log.Printf("signing narinfo with %s", key.PublicKey())
+	}
 	if *catalog != "" {
 		if err := s.LoadCatalog(*catalog); err != nil {
 			log.Fatalf("catalog %s: %v", *catalog, err)
