@@ -4,11 +4,12 @@
 # (hack/demo/index.html) that animates the requests and replies.
 #
 # Three real k3snix-agent processes run over simulated node stores built from
-# the pinned closures: node-warm holds churn-v1, node-mid holds hello
-# (share-a), node-cold is empty. As in hack/demo-real-closures.sh, a
-# simulated store holds empty entries named like the store paths, which is
-# all the inventory reads. Every number shown comes from an agent's
-# /v1/missing_bytes answer.
+# the pinned closures: node-warm holds churn-v3, node-mid holds churn-v1,
+# node-cold is empty. Deploying churn-v4 shows the gradient: the closer a
+# node is to the new version, the less it must fetch. As in
+# hack/demo-real-closures.sh, a simulated store holds empty entries named
+# like the store paths, which is all the inventory reads. Every number shown
+# comes from an agent's /v1/missing_bytes answer.
 #
 # Knobs:
 #   DEMO_APP=churn-v4  closure label to deploy (any label in the catalog)
@@ -85,7 +86,7 @@ fi
 # --- cluster -----------------------------------------------------------------
 
 nodes=(node-warm node-mid node-cold)
-declare -A holds=([node-warm]=churn-v1 [node-mid]=share-a [node-cold]="")
+declare -A holds=([node-warm]=churn-v3 [node-mid]=churn-v1 [node-cold]="")
 declare -A url
 port=$PORT_BASE
 for n in "${nodes[@]}"; do
