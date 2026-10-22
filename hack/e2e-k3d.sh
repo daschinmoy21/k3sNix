@@ -30,6 +30,13 @@
 # Catalog: the smoke creates the catalog ConfigMap from the fixture before
 # applying the manifests (this is the single documented command for it):
 #   kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json=testdata/e2e/e2e.json
+# The smoke adds the pinned manifests to it, which /v1/fetch needs.
+#
+# Delta fetch: the cold agent fetches churn-v1 (all from the origin), the
+# mid agent then fetches it again (all from the cold agent, a peer) and
+# churn-v2 (only the delta), and two concurrent fetches of hello on the warm
+# agent download each path once. Every fetched path must dump to the
+# manifest narHash.
 #
 # Scheduler: a second kube-scheduler (profile k3snix) calls the extender,
 # whose catalog holds the fixture and the pinned manifests. A pod naming the
@@ -158,7 +165,8 @@ kubectl -n kube-system rollout status deployment/coredns --timeout=120s
 
 echo "== applying manifests"
 kubectl apply -f deploy/00-namespace.yaml
-kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json="$FIXTURE"
+kubectl -n k3snix create configmap k3snix-catalog \
+  --from-file="$CLOSURES_DIR/manifests/" --from-file=e2e.json="$FIXTURE"
 kubectl -n k3snix create configmap k3snix-origin-catalog --from-file="$CLOSURES_DIR/manifests/"
 kubectl -n k3snix create secret generic k3snix-origin-key --from-file=secret-key="$tmp/origin.key"
 kubectl -n k3snix create configmap k3snix-scheduler-catalog \
@@ -383,6 +391,84 @@ if [ -n "$pf_pid" ]; then
   wait "$pf_pid" 2>/dev/null || true
   pf_pid=""
 fi
+
+# --- delta fetch -------------------------------------------------------------
+
+echo "== delta fetch: peers first, origin second, verified before visible"
+
+manifest_bytes() { jq '[.paths[].narSize] | add' "$CLOSURES_DIR/manifests/$1.json"; }
+manifest_paths() { jq '.paths | length' "$CLOSURES_DIR/manifests/$1.json"; }
+
+fetch() { # fetch POD LABEL — prints the /v1/fetch reply
+  probe "$1" http://127.0.0.1:9860/v1/fetch "{\"label\":\"$2\"}"
+}
+
+# assert_fetched POD LABEL — every path of LABEL is in POD's store and the
+# NAR it serves for each matches the manifest narHash.
+assert_fetched() {
+  local pod="$1" label="$2" resp p want h got ip
+  resp=$(probe "$pod" http://127.0.0.1:9860/v1/missing_bytes "{\"label\":\"$label\"}")
+  [ "$(jq -r '.bytes' <<<"$resp")" = "0" ] || fail "$pod still misses $label after fetch: $resp"
+  ip=$(kubectl -n k3snix get pod "$pod" -o jsonpath='{.status.podIP}')
+  while IFS=$'\t' read -r p want; do
+    h=$(basename "$p" | cut -c1-32)
+    probe "$pod" "http://$ip:9860/nar/$h.nar" >"$tmp/fetched.nar" || fail "$pod does not serve $p"
+    got="sha256:$(nixbase32 "$(sha256sum "$tmp/fetched.nar" | cut -d' ' -f1)")"
+    [ "$got" = "$want" ] || fail "$pod: $p dumps to $got, manifest narHash $want"
+  done < <(jq -r '.paths[] | [.path, .narHash] | @tsv' "$CLOSURES_DIR/manifests/$label.json")
+}
+
+v1_bytes=$(manifest_bytes churn-v1)
+
+# 1. The cold agent holds nothing of churn-v1, and neither do its peers.
+origin0=$(metric "$cold_pod" k3snix_origin_bytes)
+resp=$(fetch "$cold_pod" churn-v1) || fail "cold fetch of churn-v1"
+[ "$(jq -r '.predicted_bytes' <<<"$resp")" = "$v1_bytes" ] || fail "cold predicted bytes: $resp"
+[ "$(jq -r '.origin_bytes' <<<"$resp")" = "$v1_bytes" ] || fail "cold fetch did not come from the origin: $resp"
+[ "$(jq -r '.peer_bytes' <<<"$resp")" = "0" ] || fail "cold fetch used a peer: $resp"
+[ $(($(metric "$cold_pod" k3snix_origin_bytes) - origin0)) = "$v1_bytes" ] ||
+  fail "k3snix_origin_bytes on cold did not grow by $v1_bytes"
+assert_fetched "$cold_pod" churn-v1
+echo "  cold: churn-v1 $v1_bytes bytes from the origin, every NAR matches its narHash"
+
+# 2. The mid agent gets the same closure from the cold agent.
+origin0=$(metric "$mid_pod" k3snix_origin_bytes)
+resp=$(fetch "$mid_pod" churn-v1) || fail "mid fetch of churn-v1"
+[ "$(jq -r '.peer_bytes' <<<"$resp")" = "$v1_bytes" ] || fail "mid fetch did not come from the peer: $resp"
+[ "$(jq -r '.origin_bytes' <<<"$resp")" = "0" ] || fail "mid fetch used the origin: $resp"
+[ "$(metric "$mid_pod" k3snix_origin_bytes)" = "$origin0" ] || fail "mid origin counter moved"
+assert_fetched "$mid_pod" churn-v1
+echo "  mid: churn-v1 $v1_bytes bytes from peer $(jq -r '.fetched[0].source' <<<"$resp" | cut -d' ' -f2), 0 from the origin"
+
+# 3. Upgrading mid to churn-v2 moves only the delta.
+resp=$(fetch "$mid_pod" churn-v2) || fail "mid fetch of churn-v2"
+predicted=$(jq -r '.predicted_bytes' <<<"$resp")
+fetched=$(jq -r '.fetched_bytes' <<<"$resp")
+v2_bytes=$(manifest_bytes churn-v2)
+[ "$predicted" = "$fetched" ] || fail "churn-v2 predicted $predicted, fetched $fetched"
+[ "$fetched" -lt "$v2_bytes" ] || fail "churn-v2 fetched the whole closure ($fetched of $v2_bytes)"
+[ "$(jq -r '.local_hits' <<<"$resp")" -gt 0 ] || fail "churn-v2 had no local hits: $resp"
+assert_fetched "$mid_pod" churn-v2
+echo "  mid: churn-v2 upgrade fetched $fetched of $v2_bytes bytes (predicted $predicted), $(jq -r '.local_hits' <<<"$resp") paths local"
+
+# 4. Two concurrent fetches of one closure download every path once.
+a_bytes=$(manifest_bytes share-a)
+origin0=$(metric "$warm_pod" k3snix_origin_bytes)
+fetch "$warm_pod" share-a >"$tmp/fetch-a1.json" &
+f1=$!
+fetch "$warm_pod" share-a >"$tmp/fetch-a2.json" &
+f2=$!
+wait "$f1" || fail "first concurrent fetch of share-a"
+wait "$f2" || fail "second concurrent fetch of share-a"
+together=$(( $(jq -r '.fetched_bytes' "$tmp/fetch-a1.json") + $(jq -r '.fetched_bytes' "$tmp/fetch-a2.json") ))
+[ "$together" = "$a_bytes" ] || fail "concurrent fetches downloaded $together bytes together, closure is $a_bytes"
+[ $(($(metric "$warm_pod" k3snix_origin_bytes) - origin0)) = "$a_bytes" ] ||
+  fail "warm origin bytes grew by $(($(metric "$warm_pod" k3snix_origin_bytes) - origin0)), want $a_bytes"
+assert_fetched "$warm_pod" share-a
+echo "  warm: two concurrent share-a fetches moved $together bytes for a $a_bytes-byte closure"
+for pod in "$cold_pod" "$mid_pod" "$warm_pod"; do
+  [ "$(metric "$pod" k3snix_fetch_verify_failures)" = "0" ] || fail "$pod rejected a NAR"
+done
 
 # --- cache-aware scheduling ---------------------------------------------------
 
