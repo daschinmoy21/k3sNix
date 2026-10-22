@@ -35,6 +35,11 @@ spec:
             - -seed-by-node
             - -seed-label=e2e
             - -origin=http://k3snix-origin.k3snix.svc.cluster.local:9877
+            # /v1/fetch unpacks verified NARs into the store volume, trying
+            # the other agents (k3snix-agent-peers) before the origin.
+            - -materialize=dir
+            - -peers-dns=k3snix-agent-peers.k3snix.svc.cluster.local
+            - -peer-port=9860
           env:
             - name: NODE_NAME
               valueFrom:
@@ -59,3 +64,21 @@ spec:
         - name: catalog
           configMap:
             name: k3snix-catalog
+---
+# Headless: resolves to every agent's node IP, so agents find their peers
+# without a Kubernetes client.
+apiVersion: v1
+kind: Service
+metadata:
+  name: k3snix-agent-peers
+  namespace: k3snix
+  labels:
+    app: k3snix-agent
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: k3snix-agent
+  ports:
+    - port: 9860
+      targetPort: 9860

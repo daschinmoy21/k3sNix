@@ -28,8 +28,11 @@ Phase 2 so far:
   `k3snix.io/root` annotation (`deploy/30-extender.yaml`,
   `deploy/31-scheduler.yaml`).
 
-The bench (`cmd/bench`) is still a stub. Nothing fetches store paths on a pod
-start yet.
+- `POST /v1/fetch` on the agent: installs the store paths of a catalog
+  closure that the node lacks, from peer agents first and the origin second.
+  Every NAR is verified against the catalog before it becomes a store path.
+
+The bench (`cmd/bench`) is still a stub.
 
 ## Layout
 
