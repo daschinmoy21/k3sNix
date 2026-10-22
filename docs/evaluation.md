@@ -1,7 +1,7 @@
 # Evaluation Plan — Arms, Clusters, and Metrics
 
 This document fixes what the final benchmark compares, where it runs, and what
-it measures. It refines Phase 3 of [phases.md](./phases.md).
+it measures. It refines boxes 5 and 6 of Phase 2 in [phases.md](./phases.md).
 
 The question the benchmark answers: **does placing pods by missing Nix store
 bytes, and delivering those bytes from peers and a LAN origin, start pods
