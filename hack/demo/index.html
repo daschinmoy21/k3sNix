@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>k3snix Phase 1 demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Live view for hack/demo-phase1.sh. It polls events.jsonl, which the script
+  appends to as it runs, and animates the events in order.
+-->
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #121211; --card: #1a1a19; --track: #2b2b29; --border: #33332f;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e86;
+  --accent: #3987e5;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f2f2f0; --card: #fcfcfb; --track: #e6e5e0; --border: #d9d8d2;
+    --text: #0b0b0b; --text-2: #52514e; --muted: #77766f;
+    --accent: #2a78d6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 ui-sans-serif, system-ui, sans-serif; }
+.mono { font-family: ui-monospace, "JetBrains Mono", monospace; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+h1 { margin: 0 0 20px; font-size: 18px; color: var(--muted); font-weight: 500; }
+
+#stage { position: relative; }
+#stage svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.top { display: flex; justify-content: center; margin-bottom: 110px; }
+.row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+  opacity: .15; transition: opacity .6s, box-shadow .4s;
+}
+.card.up { opacity: 1; }
+.card.ping { box-shadow: 0 0 0 3px var(--accent); }
+#app { width: 420px; text-align: center; }
+#app .name { font-size: 26px; font-weight: 600; }
+.card h3 { margin: 0; font-size: 20px; }
+.sub { color: var(--muted); font-size: 14px; }
+.ans { margin-top: 14px; min-height: 76px; }
+.ans .big { font-size: 26px; font-weight: 600; }
+.ans .bar { height: 12px; background: var(--track); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+.ans .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 0 4px 4px 0; transition: width .9s; }
+
+.pkt text { font: 15px ui-monospace, monospace; fill: var(--text); paint-order: stroke; stroke: var(--bg); stroke-width: 5px; }
+.edge { stroke: var(--border); stroke-width: 2; fill: none; }
+
+#data { margin-top: 34px; opacity: 0; transition: opacity .6s; }
+#data.up { opacity: 1; }
+#data h2 { font-size: 15px; color: var(--muted); font-weight: 500; margin: 0 0 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+td.n, th.n { text-align: right; }
+tr.new { animation: fade 1s; }
+@keyframes fade { from { background: var(--track); } to { background: transparent; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>k3snix Phase 1: every node's agent reports what an app would cost it</h1>
+  <div id="stage">
+    <svg id="svg"></svg>
+    <div class="top"><div class="card" id="app"><div class="sub">waiting for a deploy</div></div></div>
+    <div class="row">
+      <div class="card" id="n-node-warm"></div>
+      <div class="card" id="n-node-mid"></div>
+      <div class="card" id="n-node-cold"></div>
+    </div>
+  </div>
+  <div id="data">
+    <h2>data collected from the agents (POST /v1/missing_bytes)</h2>
+    <table>
+      <thead><tr><th>node</th><th>already holds</th><th class="n">missing bytes</th><th class="n">missing</th><th class="n">paths present</th><th class="n">answered in</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const NODES = ["node-warm", "node-mid", "node-cold"];
+const $ = (id) => document.getElementById(id);
+const holds = {};
+
+function human(b) {
+  if (b >= 1e6) return (b / 1e6).toFixed(1) + " MB";
+  if (b >= 1e3) return Math.round(b / 1e3) + " KB";
+  return b + " B";
+}
+const pct = (r) => (r.total_bytes ? Math.round(1000 * r.bytes / r.total_bytes) / 10 : 0) + "%";
+
+// --- geometry ----------------------------------------------------------------
+
+function box(id) {
+  const st = $("stage").getBoundingClientRect(), r = $(id).getBoundingClientRect();
+  return { x: r.left - st.left + r.width / 2, top: r.top - st.top, bottom: r.bottom - st.top };
+}
+function route(node) {
+  const A = box("app"), B = box("n-" + node);
+  return [{ x: A.x, y: A.bottom }, { x: B.x, y: (A.bottom + B.top) / 2 }, { x: B.x, y: B.top }];
+}
+const bez = ([a, c, b], t) => ({
+  x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * c.x + t * t * b.x,
+  y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * c.y + t * t * b.y,
+});
+function svgEl(tag, attrs, parent = $("svg")) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+function drawEdges() {
+  $("svg").querySelectorAll(".edge").forEach((e) => e.remove());
+  if (!$("app").classList.contains("up")) return;
+  for (const n of NODES) {
+    const [a, c, b] = route(n);
+    svgEl("path", { class: "edge", d: `M${a.x},${a.y} Q${c.x},${c.y} ${b.x},${b.y}` });
+  }
+}
+window.addEventListener("resize", drawEdges);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function fly(pts, ms, label) {
+  const g = svgEl("g", { class: "pkt", transform: `translate(${pts[0].x},${pts[0].y})` });
+  svgEl("circle", { r: 9, fill: "var(--accent)" }, g);
+  if (label) svgEl("text", { x: 15, y: 5 }, g).textContent = label;
+  return new Promise((done) => {
+    const t0 = performance.now();
+    (function f(now) {
+      const t = Math.min(1, (now - t0) / ms), e = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      const p = bez(pts, e);
+      g.setAttribute("transform", `translate(${p.x},${p.y})`);
+      t < 1 ? requestAnimationFrame(f) : (g.remove(), done());
+    })(t0);
+  });
+}
+function ping(id) {
+  $(id).classList.add("ping");
+  setTimeout(() => $(id).classList.remove("ping"), 800);
+}
+
+// --- events ------------------------------------------------------------------------
+
+const H = {
+  async node(ev) {
+    holds[ev.node] = ev.holds;
+    const el = $("n-" + ev.node);
+    el.innerHTML = `<h3 class="mono">${ev.node}</h3>
+      <div class="sub">agent running; holds ${ev.holds === "nothing" ? "nothing" : `<span class="mono">${ev.holds}</span>`} (${ev.paths} store paths)</div>
+      <div class="ans"></div>`;
+    el.classList.add("up");
+    await sleep(400);
+  },
+  async deploy(ev) {
+    const el = $("app");
+    el.innerHTML = `<div class="sub">deploy</div><div class="name mono">${ev.app}</div>
+      <div class="sub mono">closure ${ev.id.slice(0, 16)}... | ${ev.paths} store paths | ${human(ev.bytes)}</div>`;
+    el.classList.add("up");
+    ping("app");
+    drawEdges();
+    $("data").classList.add("up");
+    await sleep(800);
+  },
+  async ask(ev) {
+    $("n-" + ev.node).querySelector(".ans").innerHTML = `<div class="sub">asking the agent...</div>`;
+    await fly(route(ev.node), 900, "what are you missing?");
+  },
+  async report(ev) {
+    const r = ev.r;
+    ping("n-" + ev.node);
+    $("n-" + ev.node).querySelector(".ans").innerHTML = `
+      <div class="big">${r.bytes === 0 ? "nothing missing" : human(r.bytes) + " missing"}</div>
+      <div class="bar"><i></i></div>
+      <div class="sub">${pct(r)} of ${human(r.total_bytes)} to fetch, ${r.have_paths}/${r.total_paths} paths present</div>`;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      $("n-" + ev.node).querySelector(".bar i").style.width = (100 * r.have_bytes / r.total_bytes) + "%";
+    }));
+    const back = route(ev.node).slice().reverse();
+    await fly(back, 900, human(r.bytes) + " missing");
+    const tr = document.createElement("tr");
+    tr.className = "new";
+    tr.innerHTML = `<td class="mono">${ev.node}</td><td class="mono">${holds[ev.node]}</td>
+      <td class="n mono">${r.bytes.toLocaleString()} B</td><td class="n mono">${pct(r)}</td>
+      <td class="n mono">${r.have_paths}/${r.total_paths}</td><td class="n mono">${r.compute_ms.toFixed(3)} ms</td>`;
+    $("rows").append(tr);
+  },
+};
+
+// --- event pump ----------------------------------------------------------------------
+
+const queue = [];
+let seen = 0, running = false;
+async function pump() {
+  if (running) return;
+  running = true;
+  while (queue.length) {
+    const ev = queue.shift();
+    try { await (H[ev.type] || (async () => {}))(ev); } catch (e) { console.error(ev, e); }
+  }
+  running = false;
+}
+async function poll() {
+  try {
+    const res = await fetch("events.jsonl", { cache: "no-store" });
+    if (res.ok) {
+      const lines = (await res.text()).split("\n").filter(Boolean);
+      if (lines.length < seen) location.reload(); // a new run started
+      for (; seen < lines.length; seen++) queue.push(JSON.parse(lines[seen]));
+      pump();
+    }
+  } catch (e) { /* the demo has stopped */ }
+  setTimeout(poll, 300);
+}
+poll();
+</script>
+</body>
+</html>
