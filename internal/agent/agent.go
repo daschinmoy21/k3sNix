@@ -48,9 +48,9 @@ type Server struct {
 	MaxDumpBytes int64
 
 	// Origin is the base URL of the upstream cache that /v1/origin_probe
-	// measures. Empty disables probing: the endpoint answers 400 and the
-	// origin counters stay untouched. Nothing else on this server ever
-	// contacts the origin.
+	// measures and /v1/fetch falls back to after the peers. Empty disables
+	// probing: the endpoint answers 400 and the origin counters stay
+	// untouched.
 	Origin string
 
 	// MaxRequestBytes caps a /v1/missing_bytes request body; larger bodies get
@@ -71,6 +71,22 @@ type Server struct {
 
 	// SignKey, when set, adds a nix Sig line to every narinfo.
 	SignKey *SigningKey
+
+	// Materializer installs fetched NARs; nil disables /v1/fetch.
+	Materializer Materializer
+
+	// Peers are peer cache base URLs /v1/fetch tries before the origin, in
+	// order. PeersDNS, when set, is resolved on every fetch and each address
+	// other than this node's own is tried next, on PeerPort.
+	Peers    []string
+	PeersDNS string
+	PeerPort int
+
+	// FetchWorkers bounds concurrent path downloads in one fetch. Zero
+	// means defaultFetchWorkers.
+	FetchWorkers int
+
+	fetchState
 
 	// catalogPaths maps a store basename to its catalog entry, so narinfo
 	// and NAR serving can find references, narHash and narSize for a path.
@@ -157,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/v1/missing_bytes", s.handleMissing)
 	mux.HandleFunc("/v1/origin_probe", s.handleOriginProbe)
+	mux.HandleFunc("/v1/fetch", s.handleFetch)
 	mux.HandleFunc("/nix-cache-info", s.handleCacheInfo)
 	mux.HandleFunc("/", s.handleCache)
 	return mux
@@ -181,6 +198,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "k3snix_origin_requests %d\n", originRequests)
 	fmt.Fprintf(w, "k3snix_origin_bytes %d\n", originBytes)
 	fmt.Fprintf(w, "k3snix_origin_verify_failures %d\n", verifyFailures)
+	s.writeFetchMetrics(w)
 }
 
 // defaultMaxRequestBytes applies when Server.MaxRequestBytes is unset.
