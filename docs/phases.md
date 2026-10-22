@@ -1,14 +1,16 @@
 # Phase Roadmap — What We Build in Each Phase
 
-The architecture deck splits the system into three phases. This document lists
-the build items per phase, the exit criteria, and how the deck phases map to the
-execution phases in spec.md. Phase 1 has its own detailed plan in
+The project runs in two phases: Phase 1 is the data plane, and Phase 2 is
+everything else (scheduling, delta fetch, runtime and benchmark), the deck's
+former Phases 2 and 3 merged. Boxes keep the deck's numbering. This document
+lists the build items per phase, the exit criteria, and how the phases map to
+the execution phases in spec.md. Phase 1 has its own detailed plan in
 [phase1.md](./phase1.md).
 
 ## Phase 0 prerequisite — feasibility gate
 
 One item from spec.md must be settled before or during Phase 1, because Phases 2
-and 3 depend on it: nix-snapshotter running a real pod rootfs on a multi-node
+depends on it: nix-snapshotter running a real pod rootfs on a multi-node
 K3s cluster. The flake already wires the module, but nobody has proven it end to
 end. Treat it as an early, time-boxed spike that can run in parallel with
 Phase 1. It no longer gates the project: the host-store design in
@@ -44,7 +46,7 @@ Status: complete. Results and the deliberate deviations from the plan are in
 [phase1.md](./phase1.md#status-and-results). The Phase 0 snapshotter spike
 above is still open.
 
-## Phase 2 — control plane: cache-aware scheduling and delta fetch
+## Phase 2 — scheduling, delta fetch, runtime and benchmark
 
 Box 3, cache-aware scheduling. Build items:
 
@@ -76,8 +78,8 @@ Box 4, delta fetch and lazy mount. Build items:
 - [x] Concurrent fetches of one path coalesce into a single transfer
 - [x] Fetch-side counters completed: origin bytes and requests, peer bytes,
       local hits, and predicted versus actually fetched missing bytes
-- [x] Materialization lands paths in `/nix/store` so the Phase 3 runtime can
-      mount them; pod-start mount behaviour itself belongs to Phase 3
+- [x] Materialization lands paths in `/nix/store` so the runtime (box 5) can
+      mount them
 
 `POST /v1/fetch` takes a catalog closure by id, label or root. NARs are
 checked against the catalog's narHash and narSize, which is stricter than the
@@ -88,7 +90,7 @@ imports through the nix daemon with `nix copy` from a staged one-path cache.
 Peers come from `-peers` and from the headless `k3snix-agent-peers` Service
 (`-peers-dns`).
 
-Exit criteria:
+Exit criteria for boxes 3 and 4:
 
 - [x] On a constructed skew, a pod with `schedulerName: k3snix` binds to the
       warm node, and the decision is explained by logged scores
@@ -96,8 +98,6 @@ Exit criteria:
       missing NARs, peers before origin, proven by counters and a store diff
 - [x] The spec.md section 7 gates that touch these components pass: coalescing,
       no partial NAR visibility, and default scheduling on extender failure
-
-## Phase 3 — runtime and benchmark
 
 Box 5, runtime. The host store is the preferred design and nix-snapshotter an
 optional comparison run; see [evaluation.md](./evaluation.md). Build items:
@@ -140,7 +140,7 @@ Box 6, benchmark. Build items:
 - [ ] Crossover sweeps against B2 and B4 that name the region where store-path
       scoring wins and the region where it does not
 
-Exit criteria:
+Exit criteria for boxes 5 and 6, which close Phase 2:
 
 - [ ] Every backend produces a results-table row from one command on a pinned
       cluster
@@ -150,22 +150,19 @@ Exit criteria:
 
 ## How the deck phases map to spec.md execution phases
 
-| Deck phase | spec.md phases | Notes |
+| Project phase | spec.md phases | Notes |
 |---|---|---|
 | Phase 1 | Phase 2 (agent, serving half) plus the closure work | fetch path deliberately excluded |
-| Phase 2 | Phase 3 (extender) plus the fetch half of spec Phase 2 | B2's layer scorer also belongs in this window |
-| Phase 3 | Phase 0 gate, Phase 1 harness, Phase 4 crossover | runtime gate first, then measurement |
+| Phase 2 | Phase 3 (extender), the fetch half of spec Phase 2, Phase 0 gate, Phase 1 harness, Phase 4 crossover | B2's layer scorer belongs here too |
 
-The two phase systems disagree on numbering, and the deck's Benchmark box covers
-what spec.md calls the harness and the crossover evaluation. Reconcile the
-wording before the viva so the panel hears one story.
+spec.md numbers its phases differently; the report and the review use the
+two project phases above.
 
 ## Sequencing notes
 
 - Phase 2 needs Phase 1's catalog and serving; do not start scoring before
   serving exists.
-- The B2 baseline and the harness are the long poles; start them during Phase 2
-  rather than after Phase 3, because spec.md forbids a results chapter without
-  B2.
+- The B2 baseline and the harness are the long poles; start them alongside
+  boxes 3 and 4, because spec.md forbids a results chapter without B2.
 - The snapshotter spike runs in parallel with Phase 1 and blocks only the
   optional `k3snix-snapshotter` arm.
