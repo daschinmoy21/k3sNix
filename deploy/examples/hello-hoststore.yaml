@@ -1,0 +1,63 @@
+# A workload delivered from the host store instead of an OCI image.
+#
+#   1. The k3snix scheduler places the pod by the bytes of ROOT's closure each
+#      node is missing (k3snix.io/root).
+#   2. The init container asks the node's agent to fetch whatever the node
+#      lacks, peers first, origin second, and to hold a GC root for this pod.
+#   3. The app runs the store path directly from the node's store, mounted
+#      read-only. The image only supplies an entrypoint-free filesystem; any
+#      small image works.
+#
+# The store volume is the agent's store: /nix/store on nodes with Nix
+# (-materialize=nix), /var/lib/k3snix/store on the k3d smoke cluster
+# (-materialize=dir). Replace ROOT with a closure root from the catalog;
+# hack/e2e-k3d.sh does so for the pinned hello and coreutils.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hoststore-app
+  annotations:
+    k3snix.io/root: ROOT
+spec:
+  schedulerName: k3snix
+  restartPolicy: Never
+  initContainers:
+    - name: k3snix-fetch
+      image: k3snix:dev
+      imagePullPolicy: Never
+      command:
+        - /bin/k3snix-agent
+        - -probe-url=http://$(HOST_IP):9860/v1/fetch
+        - '-probe-body={"root":"$(ROOT)","pod_uid":"$(POD_UID)"}'
+      env:
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: ROOT
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['k3snix.io/root']
+  containers:
+    - name: app
+      image: k3snix:dev
+      imagePullPolicy: Never
+      command: ["$(ROOT)/bin/hello"]
+      env:
+        - name: ROOT
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['k3snix.io/root']
+      volumeMounts:
+        - name: nix-store
+          mountPath: /nix/store
+          readOnly: true
+  volumes:
+    - name: nix-store
+      hostPath:
+        path: /var/lib/k3snix/store
+        type: Directory

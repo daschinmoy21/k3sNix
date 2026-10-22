@@ -2,9 +2,10 @@
 # hack/e2e-k3d.sh — k3d smoke test for the k3snix data plane.
 #
 # Seeding strategy:
-#   k3d does not share the host nix store with agent emptyDirs: every agent
-#   pod gets a fresh emptyDir at /data/store, so the fixture closure is
-#   seeded into it at startup, by node name (-seed-by-node -seed-label=e2e):
+#   k3d does not share the host nix store with the agents: every agent's
+#   store is /var/lib/k3snix/store inside its own k3d node, so the fixture
+#   closure is seeded into it at startup, by node name (-seed-by-node
+#   -seed-label=e2e):
 #     * node name ending in server-0 (or containing "warm") -> warm: every path
 #     * node name ending in -agent-0 (or containing "mid")   -> mid: first half
 #     * anything else                                       -> cold: no paths
@@ -37,6 +38,11 @@
 # churn-v2 (only the delta), and two concurrent fetches of hello on the warm
 # agent download each path once. Every fetched path must dump to the
 # manifest narHash.
+#
+# Host store: hello and coreutils pods are placed by the k3snix scheduler,
+# get their closure from an init container that calls /v1/fetch, and run
+# from the node store mounted read-only at /nix/store. Deleting hello drops
+# its GC root, and /v1/gc then removes hello but nothing coreutils needs.
 #
 # Scheduler: a second kube-scheduler (profile k3snix) calls the extender,
 # whose catalog holds the fixture and the pinned manifests. A pod naming the
@@ -538,5 +544,68 @@ k3snix_pod k3snix-fallback
 echo "  extender down: k3snix-fallback -> $(scheduled_node k3snix-fallback) (default scoring)"
 kubectl delete pod k3snix-placed k3snix-fallback --wait=false >/dev/null
 kubectl -n k3snix scale deployment/k3snix-extender --replicas=1
+
+# --- host-store runtime -----------------------------------------------------
+
+echo "== host-store pods: placed by k3snix, fetched by an init container, run read-only"
+kubectl -n k3snix rollout status deployment/k3snix-extender --timeout=120s
+
+# hoststore_pod NAME LABEL ARGV-JSON — the example workload for LABEL's root.
+hoststore_pod() {
+  local root
+  root=$(jq -r '.root' "$CLOSURES_DIR/manifests/$2.json")
+  sed -e "s#name: hoststore-app#name: $1#" \
+    -e "s#k3snix.io/root: ROOT#k3snix.io/root: $root#" \
+    -e "s#command: \[\"\$(ROOT)/bin/hello\"\]#command: $3#" \
+    deploy/examples/hello-hoststore.yaml | kubectl apply -f -
+}
+
+# 1. hello: the warm node fetched share-a above, so it scores 10 there and
+#    the init container finds every path local.
+hoststore_pod hello share-a '["$(ROOT)/bin/hello"]'
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/hello --timeout=180s ||
+  { kubectl describe pod hello >&2; fail "pod hello did not succeed"; }
+[ "$(kubectl get pod hello -o jsonpath='{.spec.nodeName}')" = "$warm_node" ] || fail "hello not on the warm node"
+out=$(kubectl logs hello -c app)
+[ "$out" = "Hello, world!" ] || fail "hello printed '$out'"
+init=$(kubectl logs hello -c k3snix-fetch)
+[ "$(jq -r '.fetched_bytes' <<<"$init")" = "0" ] || fail "hello fetched bytes on a warm node: $init"
+echo "  hello on $warm_node: '$out', init fetch moved 0 bytes ($(jq -r '.local_hits' <<<"$init") paths local)"
+
+# 2. coreutils: the warm node holds most of it through hello's libraries.
+want_missing=$(probe "$warm_pod" http://127.0.0.1:9860/v1/missing_bytes '{"label":"share-b"}' | jq -r '.bytes')
+hoststore_pod tools share-b '["$(ROOT)/bin/sleep", "3600"]'
+kubectl wait --for=condition=Ready pod/tools --timeout=180s ||
+  { kubectl describe pod tools >&2; fail "pod tools did not become ready"; }
+[ "$(kubectl get pod tools -o jsonpath='{.spec.nodeName}')" = "$warm_node" ] || fail "tools not on the warm node"
+init=$(kubectl logs tools -c k3snix-fetch)
+[ "$(jq -r '.predicted_bytes' <<<"$init")" = "$want_missing" ] || fail "tools predicted bytes: $init, missing_bytes said $want_missing"
+[ "$(jq -r '.fetched_bytes' <<<"$init")" = "$want_missing" ] || fail "tools fetched more than the missing bytes: $init"
+echo "  tools on $warm_node: fetched $want_missing of $(manifest_bytes share-b) bytes, the rest shared with hello"
+
+tools_root=$(jq -r '.root' "$CLOSURES_DIR/manifests/share-b.json")
+if kubectl exec tools -c app -- "$tools_root/bin/touch" /nix/store/k3snix-write-test 2>"$tmp/touch.err"; then
+  fail "a pod wrote into the host store"
+fi
+grep -q 'Read-only file system' "$tmp/touch.err" || fail "touch failed for another reason: $(cat "$tmp/touch.err")"
+echo "  writes to /nix/store from the pod fail: $(cat "$tmp/touch.err")"
+
+# 3. GC roots: deleting hello drops its root; collecting then keeps every
+#    path tools needs, the libraries hello shared with it included.
+[ "$(metric "$warm_pod" k3snix_gc_roots)" = "2" ] || fail "warm agent holds $(metric "$warm_pod" k3snix_gc_roots) roots, want 2"
+kubectl delete pod hello --wait=true >/dev/null
+for _ in $(seq 1 30); do
+  [ "$(metric "$warm_pod" k3snix_gc_roots)" = "1" ] && break
+  sleep 2
+done
+[ "$(metric "$warm_pod" k3snix_gc_roots)" = "1" ] || fail "hello's root outlived the pod"
+gc=$(probe "$warm_pod" http://127.0.0.1:9860/v1/gc '{}') || fail "gc on the warm agent"
+hello_root=$(jq -r '.root' "$CLOSURES_DIR/manifests/share-a.json")
+jq -e --arg p "$hello_root" '.removed | index($p)' <<<"$gc" >/dev/null || fail "gc kept hello: $gc"
+resp=$(probe "$warm_pod" http://127.0.0.1:9860/v1/missing_bytes '{"label":"share-b"}')
+[ "$(jq -r '.bytes' <<<"$resp")" = "0" ] || fail "gc removed paths tools needs: $resp"
+kubectl exec tools -c app -- "$tools_root/bin/true" || fail "tools broke after gc"
+echo "  gc removed $(jq '.removed | length' <<<"$gc") unrooted paths ($(jq -r '.removed_bytes' <<<"$gc") bytes), hello among them; tools still runs"
+kubectl delete pod tools --wait=false >/dev/null
 
 echo "== e2e smoke passed (fallback=$FALLBACK)"

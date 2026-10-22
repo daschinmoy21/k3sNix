@@ -40,6 +40,10 @@ spec:
             - -materialize=dir
             - -peers-dns=k3snix-agent-peers.k3snix.svc.cluster.local
             - -peer-port=9860
+            # One GC root per pod that fetched through this agent, removed
+            # once the kubelet has removed the pod.
+            - -gcroots-dir=/data/gcroots
+            - -kubelet-pods-dir=/host/kubelet-pods
           env:
             - name: NODE_NAME
               valueFrom:
@@ -55,12 +59,31 @@ spec:
           volumeMounts:
             - name: store
               mountPath: /data/store
+            - name: gcroots
+              mountPath: /data/gcroots
+            - name: kubelet-pods
+              mountPath: /host/kubelet-pods
+              readOnly: true
             - name: catalog
               mountPath: /catalog
               readOnly: true
       volumes:
+        # The node's store for host-store pods, which mount it read-only
+        # at /nix/store (deploy/examples/hello-hoststore.yaml). On nodes
+        # with Nix this is /nix/store itself, with -materialize=nix and
+        # -gcroots-dir under /nix/var/nix/gcroots.
         - name: store
-          emptyDir: {}
+          hostPath:
+            path: /var/lib/k3snix/store
+            type: DirectoryOrCreate
+        - name: gcroots
+          hostPath:
+            path: /var/lib/k3snix/gcroots
+            type: DirectoryOrCreate
+        - name: kubelet-pods
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
         - name: catalog
           configMap:
             name: k3snix-catalog
