@@ -39,6 +39,9 @@ func main() {
 		peersDNS   = flag.String("peers-dns", "", "DNS name whose addresses, except this node's, are peer caches")
 		peerPort   = flag.Int("peer-port", 9860, "agent port on the -peers-dns addresses")
 		workers    = flag.Int("fetch-workers", 4, "concurrent NAR downloads in one fetch")
+		rootsDir   = flag.String("gcroots-dir", "", "directory of per-pod GC roots (under /nix/var/nix/gcroots with -materialize=nix)")
+		podsDir    = flag.String("kubelet-pods-dir", "", "the kubelet's pod directory; roots of pods missing from it are removed")
+		reconcile  = flag.Duration("gcroots-interval", 10*time.Second, "how often roots of deleted pods are removed")
 	)
 	flag.Parse()
 
@@ -88,6 +91,11 @@ func main() {
 	s.PeersDNS = *peersDNS
 	s.PeerPort = *peerPort
 	s.FetchWorkers = *workers
+	s.RootsDir = *rootsDir
+	s.PodsDir = *podsDir
+	if *rootsDir != "" && *podsDir != "" {
+		go s.RunReconciler(*reconcile, nil)
+	}
 	if *seedByNode {
 		seed(s, *seedLabel)
 	}
