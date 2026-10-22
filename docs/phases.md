@@ -48,19 +48,24 @@ above is still open.
 
 Box 3, cache-aware scheduling. Build items:
 
-- [ ] Extender binary implementing the kube-scheduler extender verbs: filter as
+- [x] Extender binary implementing the kube-scheduler extender verbs: filter as
       a pass-through, and prioritize rescoring feasible nodes 0 to 10 from
       missing NAR bytes
-- [ ] Hand-rolled extender JSON types so the Go module keeps zero k8s
+- [x] Hand-rolled extender JSON types so the Go module keeps zero k8s
       dependencies
-- [ ] A second kube-scheduler Deployment with a KubeSchedulerConfiguration
+- [x] A second kube-scheduler Deployment with a KubeSchedulerConfiguration
       profile named k3snix, the extender URL, weight, timeout, and RBAC; pods
       opt in with `schedulerName: k3snix`
-- [ ] Fallback semantics: an agent timeout or error scores 0 and never blocks
+- [x] Fallback semantics: an agent timeout or error scores 0 and never blocks
       the queue, and extender failure leaves default scheduling
-- [ ] Score and decision-latency traces logged per scheduling cycle
-- [ ] Resource fit stays in the loop so cache attraction does not overload the
+- [x] Score and decision-latency traces logged per scheduling cycle
+- [x] Resource fit stays in the loop so cache attraction does not overload the
       warm node (anti-heating remains a stretch goal)
+
+The score is `round(10 × held bytes / closure bytes)`, so a node missing a
+2.4% upgrade delta still scores 10. A pod's closure comes from the catalog by
+its `k3snix.io/root` annotation. The k3d smoke checks the placement against
+the extender's trace and the fallback with the extender scaled to zero.
 
 Box 4, delta fetch and lazy mount. Build items:
 
@@ -76,7 +81,7 @@ Box 4, delta fetch and lazy mount. Build items:
 
 Exit criteria:
 
-- [ ] On a constructed skew, a pod with `schedulerName: k3snix` binds to the
+- [x] On a constructed skew, a pod with `schedulerName: k3snix` binds to the
       warm node, and the decision is explained by logged scores
 - [ ] A scheduled node ends the run holding the closure, having fetched only the
       missing NARs, peers before origin, proven by counters and a store diff

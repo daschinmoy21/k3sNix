@@ -30,6 +30,11 @@
 # Catalog: the smoke creates the catalog ConfigMap from the fixture before
 # applying the manifests (this is the single documented command for it):
 #   kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json=testdata/e2e/e2e.json
+#
+# Scheduler: a second kube-scheduler (profile k3snix) calls the extender,
+# whose catalog holds the fixture and the pinned manifests. A pod naming the
+# fixture root must bind to the warm node, the extender's trace must explain
+# why, and with the extender gone a k3snix pod must still be scheduled.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -125,6 +130,14 @@ fi
 echo "== importing image k3snix:dev into $CLUSTER"
 k3d image import k3snix:dev -c "$CLUSTER"
 
+# The second scheduler runs the upstream kube-scheduler of the server's
+# version, pulled on the host and imported like the agent image.
+k8s_version=$(kubectl version -o json | jq -r '.serverVersion.gitVersion' | sed 's/+.*//')
+scheduler_image="registry.k8s.io/kube-scheduler:$k8s_version"
+echo "== importing $scheduler_image into $CLUSTER"
+docker pull -q "$scheduler_image" >/dev/null
+k3d image import "$scheduler_image" -c "$CLUSTER"
+
 echo "== waiting for 3 Ready nodes"
 ready=0
 for _ in $(seq 1 60); do
@@ -148,13 +161,17 @@ kubectl apply -f deploy/00-namespace.yaml
 kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json="$FIXTURE"
 kubectl -n k3snix create configmap k3snix-origin-catalog --from-file="$CLOSURES_DIR/manifests/"
 kubectl -n k3snix create secret generic k3snix-origin-key --from-file=secret-key="$tmp/origin.key"
+kubectl -n k3snix create configmap k3snix-scheduler-catalog \
+  --from-file="$CLOSURES_DIR/manifests/" --from-file=e2e.json="$FIXTURE"
+mkdir "$tmp/deploy"
+cp deploy/*.yaml "$tmp/deploy/"
+sed -i "s#registry.k8s.io/kube-scheduler:v[0-9.]*#$scheduler_image#" "$tmp/deploy/31-scheduler.yaml"
 if [ "$FALLBACK" = 1 ]; then
-  sed 's#http://k3snix-origin.k3snix.svc.cluster.local:9877#http://host.k3d.internal:9877#' \
-    deploy/10-agent-daemonset.yaml >"$tmp/agent-ds.yaml"
-  kubectl apply -f "$tmp/agent-ds.yaml"
-else
-  kubectl apply -f deploy/
+  sed -i 's#http://k3snix-origin.k3snix.svc.cluster.local:9877#http://host.k3d.internal:9877#' \
+    "$tmp/deploy/10-agent-daemonset.yaml"
+  rm "$tmp/deploy/20-origin.yaml"
 fi
+kubectl apply -f "$tmp/deploy/"
 
 if ! kubectl -n k3snix rollout status daemonset/k3snix-agent --timeout=180s; then
   kubectl -n k3snix get pods -o wide || true
@@ -366,5 +383,74 @@ if [ -n "$pf_pid" ]; then
   wait "$pf_pid" 2>/dev/null || true
   pf_pid=""
 fi
+
+# --- cache-aware scheduling ---------------------------------------------------
+
+echo "== k3snix scheduler places a pod by missing bytes"
+for d in k3snix-extender k3snix-scheduler; do
+  if ! kubectl -n k3snix rollout status "deployment/$d" --timeout=180s; then
+    kubectl -n k3snix get pods -o wide || true
+    kubectl -n k3snix logs "deployment/$d" --all-containers --tail=50 || true
+    fail "deployment/$d did not become ready"
+  fi
+done
+
+fixture_root=$(jq -r '.root' "$FIXTURE")
+warm_node=$(kubectl -n k3snix get pod "$warm_pod" -o jsonpath='{.spec.nodeName}')
+
+# k3snix_pod NAME — a long-running pod for the k3snix scheduler that names
+# the fixture closure by its root path. The agent image has no shell, so the
+# agent itself (on its own image's store) keeps the container alive.
+k3snix_pod() {
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $1
+  namespace: default
+  annotations:
+    k3snix.io/root: $fixture_root
+spec:
+  schedulerName: k3snix
+  containers:
+    - name: idle
+      image: k3snix:dev
+      imagePullPolicy: Never
+      command: ["/bin/k3snix-agent", "-listen=127.0.0.1:19999", "-store=/nix/store"]
+EOF
+}
+
+# scheduled_node POD — waits until POD is bound and prints its node.
+scheduled_node() {
+  local node=""
+  for _ in $(seq 1 60); do
+    node=$(kubectl get pod "$1" -o jsonpath='{.spec.nodeName}' 2>/dev/null) || true
+    [ -n "$node" ] && break
+    sleep 2
+  done
+  [ -n "$node" ] || { kubectl describe pod "$1" >&2 || true; fail "pod $1 was never scheduled"; }
+  echo "$node"
+}
+
+k3snix_pod k3snix-placed
+placed=$(scheduled_node k3snix-placed)
+trace=$(kubectl -n k3snix logs deployment/k3snix-extender | grep -F '"pod":"default/k3snix-placed"' | tail -n 1 | sed 's/.*prioritize //')
+[ -n "$trace" ] || fail "no extender trace for default/k3snix-placed"
+echo "  extender trace: $trace"
+[ "$placed" = "$warm_node" ] || fail "k3snix-placed bound to $placed, want the warm node $warm_node"
+warm_score=$(jq -r --arg n "$warm_node" '.nodes[] | select(.node == $n) | .score' <<<"$trace")
+[ "$warm_score" = "10" ] || fail "warm node $warm_node scored $warm_score, want 10"
+[ "$(jq '[.nodes[] | select(.score == 10)] | length' <<<"$trace")" = "1" ] ||
+  fail "more than one node scored 10: $trace"
+echo "  k3snix-placed -> $placed (warm, score 10; the other nodes miss bytes)"
+
+# With the extender gone, the k3snix profile must still schedule pods with
+# its default plugins (ignorable: true).
+kubectl -n k3snix scale deployment/k3snix-extender --replicas=0
+kubectl -n k3snix wait --for=delete pod -l app=k3snix-extender --timeout=60s
+k3snix_pod k3snix-fallback
+echo "  extender down: k3snix-fallback -> $(scheduled_node k3snix-fallback) (default scoring)"
+kubectl delete pod k3snix-placed k3snix-fallback --wait=false >/dev/null
+kubectl -n k3snix scale deployment/k3snix-extender --replicas=1
 
 echo "== e2e smoke passed (fallback=$FALLBACK)"
