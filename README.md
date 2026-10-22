@@ -20,8 +20,16 @@ for the acceptance checklist and measured results, and
   and `POST /v1/origin_probe` to measure it
 - A three-node k3d smoke and a demo on the real closures
 
-The scheduler extender (`cmd/extender`) and the bench (`cmd/bench`) are
-Phase 2 and 3 stubs. Nothing fetches store paths on a pod start yet.
+Phase 2 so far:
+
+- `k3snix-extender`: a kube-scheduler extender that scores each feasible
+  node 0 to 10 by the share of the pod's closure it already holds. Pods opt
+  in with `schedulerName: k3snix` and name their software with the
+  `k3snix.io/root` annotation (`deploy/30-extender.yaml`,
+  `deploy/31-scheduler.yaml`).
+
+The bench (`cmd/bench`) is still a stub. Nothing fetches store paths on a pod
+start yet.
 
 ## Layout
 
