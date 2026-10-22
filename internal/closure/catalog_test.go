@@ -76,3 +76,32 @@ func TestCatalogClosures(t *testing.T) {
 		t.Fatalf("Closures() = %d, want 2 (one per fingerprint)", got)
 	}
 }
+
+func TestCatalogByRoot(t *testing.T) {
+	dir := writeCatalog(t, map[string]string{
+		"web.json": `{"label": "web", "root": "/nix/store/r1-web", "paths": [
+			{"path": "/nix/store/r1-web", "narSize": 100}
+		]}`,
+	})
+	cat, err := LoadCatalog(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := cat.ByRoot("/nix/store/r1-web")
+	if !ok || c.Label != "web" {
+		t.Fatalf("ByRoot = %+v, %v; want the web closure", c, ok)
+	}
+	if _, ok := cat.ByRoot("/nix/store/r2-other"); ok {
+		t.Fatal("ByRoot found a root no manifest records")
+	}
+}
+
+func TestCatalogRootConflict(t *testing.T) {
+	dir := writeCatalog(t, map[string]string{
+		"a.json": `{"label": "a", "root": "/nix/store/r1", "paths": [{"path": "/nix/store/r1", "narSize": 1}]}`,
+		"b.json": `{"label": "b", "root": "/nix/store/r1", "paths": [{"path": "/nix/store/r1", "narSize": 2}]}`,
+	})
+	if _, err := LoadCatalog(dir); err == nil || !strings.Contains(err.Error(), "/nix/store/r1") {
+		t.Fatalf("LoadCatalog error %v, want a root conflict naming the root", err)
+	}
+}
