@@ -1,0 +1,58 @@
+# The k3snix scheduler extender. It reads the same closure catalog as the
+# origin and asks each node's agent (hostNetwork, port 9860 on the node's
+# InternalIP) how many bytes of the pod's closure that node is missing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k3snix-extender
+  namespace: k3snix
+  labels:
+    app: k3snix-extender
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k3snix-extender
+  template:
+    metadata:
+      labels:
+        app: k3snix-extender
+    spec:
+      containers:
+        - name: extender
+          image: k3snix:dev
+          imagePullPolicy: Never
+          command: ["/bin/k3snix-extender"]
+          args:
+            - -listen=:9870
+            - -catalog=/catalog
+            - -agent-url=http://{ip}:9860
+            - -agent-timeout=500ms
+          ports:
+            - containerPort: 9870
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9870
+          volumeMounts:
+            - name: catalog
+              mountPath: /catalog
+              readOnly: true
+      volumes:
+        - name: catalog
+          configMap:
+            name: k3snix-scheduler-catalog
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k3snix-extender
+  namespace: k3snix
+  labels:
+    app: k3snix-extender
+spec:
+  selector:
+    app: k3snix-extender
+  ports:
+    - port: 9870
+      targetPort: 9870
