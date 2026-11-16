@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -47,6 +48,12 @@ type Server struct {
 	// defaultMaxDumpBytes.
 	MaxDumpBytes int64
 
+	// MaxConcurrentDumps bounds how many nix-store --dump processes may run
+	// in parallel. Additional requests wait for an available slot or fail
+	// with 503 Service Unavailable when their request context expires.
+	// Zero means defaultMaxConcurrentDumps.
+	MaxConcurrentDumps int
+
 	// Origin is the base URL of the upstream cache that /v1/origin_probe
 	// measures. Empty disables probing: the endpoint answers 400 and the
 	// origin counters stay untouched. Nothing else on this server ever
@@ -79,6 +86,7 @@ type Server struct {
 	mu                   sync.Mutex
 	dumps                map[string]*dumpCall
 	dumpBytes            int64 // total size of the finished dumps in dumps
+	dumpSem              chan struct{}
 	narServed            int64
 	bytesServed          int64
 	narHashMismatches    int64
@@ -108,17 +116,23 @@ const (
 	defaultDumpTTL = 5 * time.Minute
 	// defaultMaxDumpBytes applies when Server.MaxDumpBytes is unset.
 	defaultMaxDumpBytes = 2 << 30
+	// defaultMaxConcurrentDumps applies when Server.MaxConcurrentDumps is unset.
+	defaultMaxConcurrentDumps = 4
+	// defaultOversizedTTL bounds how long an idle oversized dump (> MaxDumpBytes)
+	// is kept so a subsequent NAR request can reuse the dump that narinfo computed.
+	defaultOversizedTTL = 30 * time.Second
 )
 
 // New returns a Server serving storeDir.
 func New(storeDir string) *Server {
 	return &Server{
-		Store:        inventory.New(storeDir),
-		DumpFunc:     NARStoreDump,
-		DumpTTL:      defaultDumpTTL,
-		MaxDumpBytes: defaultMaxDumpBytes,
-		dumps:        map[string]*dumpCall{},
-		Log:          log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
+		Store:              inventory.New(storeDir),
+		DumpFunc:           NARStoreDump,
+		DumpTTL:            defaultDumpTTL,
+		MaxDumpBytes:       defaultMaxDumpBytes,
+		MaxConcurrentDumps: defaultMaxConcurrentDumps,
+		dumps:              map[string]*dumpCall{},
+		Log:                log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
 	}
 }
 
@@ -305,6 +319,26 @@ func validStoreHash(s string) bool {
 	return len(s) == 32 && nixbase32.IsValid(s)
 }
 
+func (s *Server) acquireDumpSlot(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	limit := s.MaxConcurrentDumps
+	if limit <= 0 {
+		limit = defaultMaxConcurrentDumps
+	}
+	if s.dumpSem == nil || cap(s.dumpSem) != limit {
+		s.dumpSem = make(chan struct{}, limit)
+	}
+	sem := s.dumpSem
+	s.mu.Unlock()
+
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // serveNarinfo answers from the catalog when it records the path's narHash
 // and narSize, so a narinfo request never costs a dump; serveNAR then
 // refuses any dump that disagrees with those values. Paths the catalog does
@@ -322,10 +356,14 @@ func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash strin
 	}
 	narHash, narSize := meta.NarHashNix32(), int64(meta.NarSize)
 	if narHash == "" || narSize == 0 {
-		res, release, err := s.dumpCoalesced(path)
+		res, release, err := s.dumpCoalesced(r.Context(), path)
 		defer release()
 		if err != nil {
 			s.logError("narinfo", path, err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -361,10 +399,14 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 		http.NotFound(w, r)
 		return
 	}
-	res, release, err := s.dumpCoalesced(path)
+	res, release, err := s.dumpCoalesced(r.Context(), path)
 	defer release()
 	if err != nil {
 		s.logError("nar", path, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -400,34 +442,73 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 // produced. An entry is never evicted while a caller holds it, however long
 // the dump took. A failed dump is dropped from the cache so the next request
 // dumps again.
-func (s *Server) dumpCoalesced(path string) (dumpResult, func(), error) {
-	s.mu.Lock()
-	s.evictLocked(time.Now())
-	c, ok := s.dumps[path]
-	if !ok {
-		c = &dumpCall{done: make(chan struct{})}
-		s.dumps[path] = c
+func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	c.refs++
-	s.mu.Unlock()
-	release := func() { s.release(c) }
+	for {
+		s.mu.Lock()
+		s.evictLocked(time.Now())
+		if s.dumps == nil {
+			s.dumps = map[string]*dumpCall{}
+		}
+		c, ok := s.dumps[path]
+		if !ok {
+			c = &dumpCall{done: make(chan struct{})}
+			s.dumps[path] = c
+		}
+		c.refs++
+		s.mu.Unlock()
+		release := func() { s.release(c) }
 
-	if ok {
-		<-c.done
-		return c.res, release, c.err
-	}
+		if ok {
+			select {
+			case <-c.done:
+				if c.err != nil && (errors.Is(c.err, context.Canceled) || errors.Is(c.err, context.DeadlineExceeded)) && ctx.Err() == nil {
+					release()
+					continue
+				}
+				return c.res, release, c.err
+			default:
+			}
+			select {
+			case <-c.done:
+				if c.err != nil && (errors.Is(c.err, context.Canceled) || errors.Is(c.err, context.DeadlineExceeded)) && ctx.Err() == nil {
+					release()
+					continue
+				}
+				return c.res, release, c.err
+			case <-ctx.Done():
+				return dumpResult{}, release, ctx.Err()
+			}
+		}
 
-	res, err := s.dumpOnce(path)
-	c.res, c.err = res, err
-	s.mu.Lock()
-	if err != nil {
-		delete(s.dumps, path)
-	} else {
-		s.dumpBytes += res.size
+		releaseSlot, err := s.acquireDumpSlot(ctx)
+		if err != nil {
+			s.mu.Lock()
+			delete(s.dumps, path)
+			c.err = err
+			close(c.done)
+			s.mu.Unlock()
+			return dumpResult{}, release, err
+		}
+
+		res, err := func() (dumpResult, error) {
+			defer releaseSlot()
+			return s.dumpOnce(path)
+		}()
+
+		c.res, c.err = res, err
+		s.mu.Lock()
+		if err != nil {
+			delete(s.dumps, path)
+		} else {
+			s.dumpBytes += res.size
+		}
+		s.mu.Unlock()
+		close(c.done)
+		return res, release, err
 	}
-	s.mu.Unlock()
-	close(c.done)
-	return res, release, err
 }
 
 // release drops one caller's hold on c and sweeps the cache, so a dump that
@@ -440,11 +521,11 @@ func (s *Server) release(c *dumpCall) {
 	s.evictLocked(c.used)
 }
 
-// evictLocked unlinks idle dumps: first those unused for DumpTTL, then,
-// least recently used first, as many as it takes to bring the total under
-// MaxDumpBytes. Held entries are skipped; the leader holds its entry until
-// after the dump finishes, so running dumps are skipped too. Callers must
-// hold s.mu.
+// evictLocked unlinks idle dumps: first those unused for DumpTTL (or
+// oversizedTTL for dumps exceeding MaxDumpBytes), then, least recently used
+// first, as many as it takes to bring the total under MaxDumpBytes. Held
+// entries are skipped; the leader holds its entry until after the dump
+// finishes, so running dumps are skipped too. Callers must hold s.mu.
 func (s *Server) evictLocked(now time.Time) {
 	ttl := s.DumpTTL
 	if ttl <= 0 {
@@ -454,13 +535,21 @@ func (s *Server) evictLocked(now time.Time) {
 	if limit <= 0 {
 		limit = defaultMaxDumpBytes
 	}
+	oversizedTTL := defaultOversizedTTL
+	if ttl < oversizedTTL {
+		oversizedTTL = ttl
+	}
 
 	var idle []string
 	for path, c := range s.dumps {
 		if c.refs > 0 {
 			continue
 		}
-		if now.Sub(c.used) >= ttl {
+		maxAge := ttl
+		if c.res.size > limit {
+			maxAge = oversizedTTL
+		}
+		if now.Sub(c.used) >= maxAge {
 			s.dropLocked(path, c)
 			continue
 		}
@@ -476,7 +565,13 @@ func (s *Server) evictLocked(now time.Time) {
 		if s.dumpBytes <= limit {
 			return
 		}
-		s.dropLocked(path, s.dumps[path])
+		c := s.dumps[path]
+		// Retain recently-used oversized dumps briefly so the following
+		// NAR request can reuse the dump produced for narinfo.
+		if c.res.size > limit && now.Sub(c.used) < oversizedTTL {
+			continue
+		}
+		s.dropLocked(path, c)
 	}
 }
 
