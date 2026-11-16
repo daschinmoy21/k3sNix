@@ -464,15 +464,6 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 					continue
 				}
 				return c.res, release, c.err
-			default:
-			}
-			select {
-			case <-c.done:
-				if c.err != nil && (errors.Is(c.err, context.Canceled) || errors.Is(c.err, context.DeadlineExceeded)) && ctx.Err() == nil {
-					release()
-					continue
-				}
-				return c.res, release, c.err
 			case <-ctx.Done():
 				return dumpResult{}, release, ctx.Err()
 			}
@@ -488,18 +479,19 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 			return dumpResult{}, release, err
 		}
 
-		res, err := s.dumpOnce(path)
-		releaseSlot()
+		res, err := func() (dumpResult, error) {
+			defer releaseSlot()
+			return s.dumpOnce(path)
+		}()
 
 		limit := s.MaxDumpBytes
 		if limit <= 0 {
 			limit = defaultMaxDumpBytes
 		}
 
+		s.mu.Lock()
 		c.res, c.err = res, err
 		c.oversized = res.size > limit
-
-		s.mu.Lock()
 		if err != nil {
 			delete(s.dumps, path)
 		} else {
@@ -579,7 +571,9 @@ func (s *Server) evictLocked(now time.Time) {
 		if s.dumpBytes <= limit {
 			return
 		}
-		s.dropLocked(path, s.dumps[path])
+		if c, ok := s.dumps[path]; ok {
+			s.dropLocked(path, c)
+		}
 	}
 }
 
