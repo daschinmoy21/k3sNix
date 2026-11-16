@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io"
 	"log"
@@ -24,7 +25,7 @@ func main() {
 		ttl                = flag.Duration("ttl", 2*time.Second, "store listing TTL")
 		dumpTTL            = flag.Duration("dump-ttl", 5*time.Minute, "how long an idle NAR dump stays cached")
 		dumpBytes          = flag.Int64("dump-cache-bytes", 2<<30, "cap on the total size of cached NAR dumps")
-		maxConcurrentDumps = flag.Int("max-concurrent-dumps", 4, "cap on concurrent in-flight NAR dumps")
+		maxConcurrentDumps = flag.Int("max-concurrent-dumps", 4, "cap on concurrent in-flight NAR dumps (default 4; extra requests wait or return 503 on timeout)")
 		origin             = flag.String("origin", "", "upstream origin cache base URL for /v1/origin_probe")
 		seedByNode         = flag.Bool("seed-by-node", false, "seed the store from the label closure according to NODE_NAME")
 		seedLabel          = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
@@ -37,9 +38,17 @@ func main() {
 	)
 	flag.Parse()
 
+	if *maxConcurrentDumps < 1 {
+		log.Fatalf("-max-concurrent-dumps must be at least 1, got %d", *maxConcurrentDumps)
+	}
+
 	if *probeURL != "" {
 		probe(*probeURL, *probeBody)
 		return
+	}
+
+	if n := agent.CleanStaleDumps(os.TempDir()); n > 0 {
+		log.Printf("cleaned %d stale NAR dump temp file(s)", n)
 	}
 
 	s := agent.New(*store)
@@ -77,6 +86,7 @@ func main() {
 	}
 
 	s.MaxRequestBytes = *maxReqBody
+	s.StartJanitor(context.Background(), 1*time.Minute)
 	srv := &http.Server{
 		Addr:              *listen,
 		Handler:           s.Handler(),

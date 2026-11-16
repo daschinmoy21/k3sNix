@@ -87,6 +87,7 @@ type Server struct {
 	dumps                map[string]*dumpCall
 	dumpBytes            int64 // total size of the finished dumps in dumps
 	dumpSem              chan struct{}
+	dumpSlotTimeouts     int64
 	narServed            int64
 	bytesServed          int64
 	narHashMismatches    int64
@@ -187,6 +188,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	narServed, bytesServed := s.narServed, s.bytesServed
 	originRequests, originBytes := s.originRequests, s.originBytes
 	mismatches, verifyFailures := s.narHashMismatches, s.originVerifyFailures
+	slotsInUse := len(s.dumpSem)
+	slotTimeouts := s.dumpSlotTimeouts
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, "k3snix_nar_served %d\n", narServed)
@@ -196,6 +199,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "k3snix_origin_requests %d\n", originRequests)
 	fmt.Fprintf(w, "k3snix_origin_bytes %d\n", originBytes)
 	fmt.Fprintf(w, "k3snix_origin_verify_failures %d\n", verifyFailures)
+	fmt.Fprintf(w, "k3snix_dump_slots_in_use %d\n", slotsInUse)
+	fmt.Fprintf(w, "k3snix_dump_slot_timeouts %d\n", slotTimeouts)
 }
 
 // defaultMaxRequestBytes applies when Server.MaxRequestBytes is unset.
@@ -332,10 +337,20 @@ func (s *Server) acquireDumpSlot(ctx context.Context) (func(), error) {
 	sem := s.dumpSem
 	s.mu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		s.mu.Lock()
+		s.dumpSlotTimeouts++
+		s.mu.Unlock()
+		return nil, err
+	}
+
 	select {
 	case sem <- struct{}{}:
 		return func() { <-sem }, nil
 	case <-ctx.Done():
+		s.mu.Lock()
+		s.dumpSlotTimeouts++
+		s.mu.Unlock()
 		return nil, ctx.Err()
 	}
 }
@@ -479,8 +494,13 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 			return dumpResult{}, release, err
 		}
 
-		res, err := func() (dumpResult, error) {
+		res, err := func() (res dumpResult, err error) {
 			defer releaseSlot()
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("dump %s panicked: %v", path, r)
+				}
+			}()
 			return s.dumpOnce(path)
 		}()
 
@@ -520,6 +540,24 @@ func (s *Server) release(c *dumpCall) {
 	c.refs--
 	c.used = time.Now()
 	s.evictLocked(c.used)
+}
+
+// StartJanitor evicts expired dumps every interval until ctx is done.
+func (s *Server) StartJanitor(ctx context.Context, interval time.Duration) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.mu.Lock()
+				s.evictLocked(time.Now())
+				s.mu.Unlock()
+			}
+		}
+	}()
 }
 
 // evictLocked unlinks idle dumps: first those unused for DumpTTL (or
@@ -624,6 +662,29 @@ func (s *Server) dumpOnce(path string) (dumpResult, error) {
 	}
 	kept = true
 	return dumpResult{file: name, size: size, hash: nixbase32.EncodeToString(h.Sum(nil))}, nil
+}
+
+// CleanStaleDumps removes leftover k3snix-nar-* temp files in dir and returns
+// the number of files deleted. It is intended to be called at agent startup
+// to clean up files left behind by unexpected crashes.
+func CleanStaleDumps(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, "k3snix-nar-") {
+			if err := os.Remove(filepath.Join(dir, name)); err == nil {
+				removed++
+			}
+		}
+	}
+	return removed
 }
 
 // references returns the sorted basenames a store path refers to: from the

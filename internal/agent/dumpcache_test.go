@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -260,9 +262,12 @@ func TestMaxConcurrentDumpsLimit(t *testing.T) {
 		t.Fatal("timed out waiting for concurrent dumps to reach limit")
 	}
 
-	// Verify currently active dumps never exceeded the cap.
-	if got := activeDumps.Load(); got > maxConcurrent {
-		t.Fatalf("active dumps %d exceeded max %d", got, maxConcurrent)
+	// Sleep briefly so other goroutines have a chance to run if limit were missing.
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify currently active dumps is exactly the cap.
+	if got := activeDumps.Load(); got != maxConcurrent {
+		t.Fatalf("active dumps = %d, want exactly %d", got, maxConcurrent)
 	}
 
 	// Release the gate and allow all dumps to finish.
@@ -339,8 +344,32 @@ func TestSamePathCoalescingDoesNotConsumeMultipleSlots(t *testing.T) {
 		}(i)
 	}
 
-	// Give waiters time to attach to c.done
-	time.Sleep(20 * time.Millisecond)
+	// Poll under s.mu until all callers have attached (refs == callers).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		c, ok := s.dumps[p]
+		refs := 0
+		if ok {
+			refs = c.refs
+		}
+		s.mu.Unlock()
+		if refs == callers {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d callers to attach, got refs=%d", callers, refs)
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Verify while gate is closed that only one dump slot is in use.
+	s.mu.Lock()
+	semLen := len(s.dumpSem)
+	s.mu.Unlock()
+	if semLen != 1 {
+		t.Fatalf("slots in use = %d, want 1", semLen)
+	}
 
 	// Finish the leader's dump
 	close(dumpGate)
@@ -385,8 +414,14 @@ func TestContextExpirationWhileWaitingReturns503(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	// Start request 1 for p1 (occupies the only slot)
 	var wg sync.WaitGroup
+	var p1Once sync.Once
+	defer func() {
+		p1Once.Do(func() { close(p1Block) })
+		wg.Wait()
+	}()
+
+	// Start request 1 for p1 (occupies the only slot)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -428,7 +463,7 @@ func TestContextExpirationWhileWaitingReturns503(t *testing.T) {
 	}
 
 	// Unblock request 1 and finish
-	close(p1Block)
+	p1Once.Do(func() { close(p1Block) })
 	wg.Wait()
 }
 
@@ -511,28 +546,28 @@ func TestSmallPathNotEvictedByOversizedDump(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	// 1. Client requests narinfo for oversized path
-	resp, err := http.Get(srv.URL + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo")
+	// 1. Client requests narinfo for small path
+	resp, err := http.Get(srv.URL + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.narinfo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 
-	// 2. Client requests narinfo for small path
-	resp, err = http.Get(srv.URL + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.narinfo")
+	// 2. Client requests narinfo for oversized path
+	resp, err = http.Get(srv.URL + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 
-	// 3. Client requests NAR for small path - must reuse the dump from step 2!
+	// 3. Client requests NAR for small path - must reuse the dump from step 1!
 	resp, err = http.Get(srv.URL + "/nar/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.nar")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 
-	// 4. Client requests NAR for oversized path - must reuse the dump from step 1!
+	// 4. Client requests NAR for oversized path - must reuse the dump from step 2!
 	resp, err = http.Get(srv.URL + "/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar")
 	if err != nil {
 		t.Fatal(err)
@@ -616,5 +651,431 @@ func TestOversizedDumpsDoNotAccumulateOnDisk(t *testing.T) {
 	}
 	if _, err := os.Stat(p2File); err != nil {
 		t.Fatalf("p2 file should exist on disk: %v", err)
+	}
+}
+
+func TestPanicInDumpFuncDoesNotPoisonPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-panicpkg")
+	mustDir(t, p)
+
+	s := newServer(t, dir)
+	s.MaxConcurrentDumps = 1
+
+	var calls atomic.Int32
+	s.DumpFunc = func(path string, w io.Writer) error {
+		if calls.Add(1) == 1 {
+			panic("simulated dump explosion")
+		}
+		_, err := w.Write([]byte("healthy dump"))
+		return err
+	}
+
+	// First call should return an error, not panic
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel1()
+	_, release1, err1 := s.dumpCoalesced(ctx1, p)
+	if err1 == nil {
+		release1()
+		t.Fatalf("first call should have failed with error, got nil")
+	}
+	release1()
+
+	// Semaphore slot must be freed immediately (len == 0)
+	s.mu.Lock()
+	semLen := len(s.dumpSem)
+	s.mu.Unlock()
+	if semLen != 0 {
+		t.Fatalf("semaphore slot leaked: len = %d, want 0", semLen)
+	}
+
+	// Second call must succeed within 2 seconds
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	res2, release2, err2 := s.dumpCoalesced(ctx2, p)
+	if err2 != nil {
+		t.Fatalf("second call should have succeeded, got error: %v", err2)
+	}
+	defer release2()
+	if res2.size != int64(len("healthy dump")) {
+		t.Fatalf("second call size = %d, want %d", res2.size, len("healthy dump"))
+	}
+}
+
+func TestWaiterTakesOverWhenLeaderContextExpires(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pathA")
+	pathB := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-pathB")
+	mustDir(t, pathA)
+	mustDir(t, pathB)
+
+	s := newServer(t, dir)
+	s.MaxConcurrentDumps = 1
+
+	gateA := make(chan struct{})
+	startedA := make(chan struct{})
+	var dumpsB atomic.Int32
+
+	s.DumpFunc = func(path string, w io.Writer) error {
+		if path == pathA {
+			close(startedA)
+			<-gateA
+			_, err := w.Write([]byte("dumpA"))
+			return err
+		}
+		if path == pathB {
+			dumpsB.Add(1)
+			_, err := w.Write([]byte("dumpB"))
+			return err
+		}
+		return nil
+	}
+
+	// 1. Path A holds the only slot
+	var wgA sync.WaitGroup
+	wgA.Add(1)
+	go func() {
+		defer wgA.Done()
+		res, release, err := s.dumpCoalesced(context.Background(), pathA)
+		if err == nil {
+			release()
+		}
+		_ = res
+	}()
+	<-startedA
+
+	// 2. Start leader for path B with a short timeout (30ms). It will wait for a slot.
+	ctxLeader, cancelLeader := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancelLeader()
+
+	var wgLeader sync.WaitGroup
+	var errLeader error
+	wgLeader.Add(1)
+	go func() {
+		defer wgLeader.Done()
+		_, release, err := s.dumpCoalesced(ctxLeader, pathB)
+		if err == nil {
+			release()
+		}
+		errLeader = err
+	}()
+
+	// 3. Poll until s.dumps[pathB].refs == 1 under s.mu
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		c, ok := s.dumps[pathB]
+		refs := 0
+		if ok {
+			refs = c.refs
+		}
+		s.mu.Unlock()
+		if refs == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for leader B to register")
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Start a waiter for B with context.Background()
+	ctxWaiter, cancelWaiter := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWaiter()
+
+	var wgWaiter sync.WaitGroup
+	var resWaiter dumpResult
+	var errWaiter error
+	wgWaiter.Add(1)
+	go func() {
+		defer wgWaiter.Done()
+		res, release, err := s.dumpCoalesced(ctxWaiter, pathB)
+		if err == nil {
+			release()
+		}
+		resWaiter = res
+		errWaiter = err
+	}()
+
+	// Poll until refs == 2
+	for {
+		s.mu.Lock()
+		c, ok := s.dumps[pathB]
+		refs := 0
+		if ok {
+			refs = c.refs
+		}
+		s.mu.Unlock()
+		if refs >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for waiter B to attach")
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// 4. Wait for leader context to expire
+	wgLeader.Wait()
+	if !errors.Is(errLeader, context.DeadlineExceeded) && !errors.Is(errLeader, context.Canceled) {
+		t.Fatalf("leader expected context deadline exceeded, got: %v", errLeader)
+	}
+
+	// 5. Open gate for A, releasing the slot
+	close(gateA)
+	wgA.Wait()
+
+	// Waiter must take over as leader, acquire the slot, and succeed
+	wgWaiter.Wait()
+	if errWaiter != nil {
+		t.Fatalf("waiter failed after leader gave up: %v", errWaiter)
+	}
+	if resWaiter.size != int64(len("dumpB")) {
+		t.Fatalf("waiter got size %d, want %d", resWaiter.size, len("dumpB"))
+	}
+	if got := dumpsB.Load(); got != 1 {
+		t.Fatalf("DumpFunc for path B executed %d times, want 1", got)
+	}
+}
+
+func TestCancelledContextDoesNotStartDump(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cancelled")
+	mustDir(t, p)
+
+	s := newServer(t, dir)
+	var dumps atomic.Int32
+	s.DumpFunc = func(path string, w io.Writer) error {
+		dumps.Add(1)
+		_, err := w.Write([]byte("dump-cancelled"))
+		return err
+	}
+
+	for i := 0; i < 200; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel before calling dumpCoalesced
+
+		_, release, err := s.dumpCoalesced(ctx, p)
+		if release != nil {
+			release()
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("iteration %d: expected context.Canceled, got: %v", i, err)
+		}
+	}
+
+	if got := dumps.Load(); got != 0 {
+		t.Fatalf("DumpFunc called %d times for cancelled context, want 0", got)
+	}
+}
+
+func TestJanitorEvictsExpiredDumps(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-janitor")
+	mustDir(t, p)
+
+	s := newServer(t, dir)
+	s.DumpTTL = 20 * time.Millisecond
+	s.DumpFunc = func(path string, w io.Writer) error {
+		_, err := w.Write([]byte("janitor-data"))
+		return err
+	}
+
+	res, release, err := s.dumpCoalesced(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(res.file); err != nil {
+		t.Fatalf("dump file should exist on disk: %v", err)
+	}
+	release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.StartJanitor(ctx, 10*time.Millisecond)
+
+	// With no other requests, wait and assert file is gone within a second.
+	deadline := time.Now().Add(1 * time.Second)
+	removed := false
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(res.file); os.IsNotExist(err) {
+			removed = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !removed {
+		t.Fatalf("janitor failed to remove expired dump %s within 1s", res.file)
+	}
+}
+
+func TestCleanStaleDumps(t *testing.T) {
+	dir := t.TempDir()
+
+	f1 := filepath.Join(dir, "k3snix-nar-123456")
+	f2 := filepath.Join(dir, "k3snix-nar-abcdef")
+	f3 := filepath.Join(dir, "k3snix-nar-temp99")
+	unrelated := filepath.Join(dir, "unrelated.txt")
+
+	for _, f := range []string{f1, f2, f3, unrelated} {
+		if err := os.WriteFile(f, []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	removed := CleanStaleDumps(dir)
+	if removed != 3 {
+		t.Fatalf("CleanStaleDumps removed %d files, want 3", removed)
+	}
+
+	for _, f := range []string{f1, f2, f3} {
+		if _, err := os.Stat(f); !os.IsNotExist(err) {
+			t.Fatalf("file %s should have been deleted", f)
+		}
+	}
+
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated file should not have been deleted: %v", err)
+	}
+}
+
+func TestDumpMetricsSlotsAndTimeout(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-p1")
+	p2 := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-p2")
+	mustDir(t, p1)
+	mustDir(t, p2)
+
+	s := newServer(t, dir)
+	s.MaxConcurrentDumps = 1
+
+	gate := make(chan struct{})
+	started := make(chan struct{})
+
+	s.DumpFunc = func(path string, w io.Writer) error {
+		if path == p1 {
+			close(started)
+			<-gate
+		}
+		_, err := w.Write([]byte("dump-data"))
+		return err
+	}
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	var wg sync.WaitGroup
+	var onceGate sync.Once
+	defer func() {
+		onceGate.Do(func() { close(gate) })
+		wg.Wait()
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res, release, err := s.dumpCoalesced(context.Background(), p1)
+		if err == nil {
+			release()
+		}
+		_ = res
+	}()
+
+	<-started
+
+	getMetrics := func() string {
+		resp, err := http.Get(srv.URL + "/metrics")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return string(body)
+	}
+
+	m1 := getMetrics()
+	if !strings.Contains(m1, "k3snix_dump_slots_in_use 1\n") {
+		t.Fatalf("expected k3snix_dump_slots_in_use 1, got:\n%s", m1)
+	}
+	if !strings.Contains(m1, "k3snix_dump_slot_timeouts 0\n") {
+		t.Fatalf("expected k3snix_dump_slot_timeouts 0, got:\n%s", m1)
+	}
+
+	// Trigger timeout on p2
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, release2, err := s.dumpCoalesced(ctx, p2)
+	if release2 != nil {
+		release2()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context timeout, got %v", err)
+	}
+
+	m2 := getMetrics()
+	if !strings.Contains(m2, "k3snix_dump_slot_timeouts 1\n") {
+		t.Fatalf("expected k3snix_dump_slot_timeouts 1, got:\n%s", m2)
+	}
+
+	onceGate.Do(func() { close(gate) })
+	wg.Wait()
+
+	m3 := getMetrics()
+	if !strings.Contains(m3, "k3snix_dump_slots_in_use 0\n") {
+		t.Fatalf("expected k3snix_dump_slots_in_use 0, got:\n%s", m3)
+	}
+}
+
+func TestAlternatingOversizedPathsDumpTwice(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-p1")
+	p2 := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-p2")
+	mustDir(t, p1)
+	mustDir(t, p2)
+
+	s := newServer(t, dir)
+	s.MaxDumpBytes = 10
+
+	var p1Dumps, p2Dumps atomic.Int32
+	s.DumpFunc = func(path string, w io.Writer) error {
+		if path == p1 {
+			p1Dumps.Add(1)
+		} else if path == p2 {
+			p2Dumps.Add(1)
+		}
+		_, err := w.Write([]byte("01234567890123456789")) // 20 bytes (> 10)
+		return err
+	}
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// 1. Client requests p1.narinfo (dumps p1, count 1)
+	resp, err := http.Get(srv.URL + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// 2. Client requests p2.narinfo (dumps p2, count 1; evicts p1)
+	resp, err = http.Get(srv.URL + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// 3. Client requests p1.nar (p1 was evicted by p2, so it re-dumps, count 2)
+	resp, err = http.Get(srv.URL + "/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if got := p1Dumps.Load(); got != 2 {
+		t.Fatalf("p1 dumped %d times, want 2 (alternating oversized paths evict each other)", got)
+	}
+	if got := p2Dumps.Load(); got != 1 {
+		t.Fatalf("p2 dumped %d times, want 1", got)
 	}
 }
