@@ -54,10 +54,6 @@ type Server struct {
 	// Zero means defaultMaxConcurrentDumps.
 	MaxConcurrentDumps int
 
-	// DumpWaitTimeout bounds how long a request waits for a dump concurrency
-	// slot before returning 503 Service Unavailable. Zero means defaultDumpWaitTimeout.
-	DumpWaitTimeout time.Duration
-
 	// Origin is the base URL of the upstream cache that /v1/origin_probe
 	// measures. Empty disables probing: the endpoint answers 400 and the
 	// origin counters stay untouched. Nothing else on this server ever
@@ -108,11 +104,12 @@ type dumpResult struct {
 }
 
 type dumpCall struct {
-	done chan struct{}
-	res  dumpResult
-	err  error
-	refs int       // callers holding res; a held entry is never evicted
-	used time.Time // when the last caller released res
+	done      chan struct{}
+	res       dumpResult
+	err       error
+	refs      int       // callers holding res; a held entry is never evicted
+	used      time.Time // when the last caller released res
+	oversized bool      // true if res.size exceeds MaxDumpBytes
 }
 
 const (
@@ -122,8 +119,6 @@ const (
 	defaultMaxDumpBytes = 2 << 30
 	// defaultMaxConcurrentDumps applies when Server.MaxConcurrentDumps is unset.
 	defaultMaxConcurrentDumps = 4
-	// defaultDumpWaitTimeout bounds how long a request waits for a dump concurrency slot.
-	defaultDumpWaitTimeout = 30 * time.Second
 	// defaultOversizedTTL bounds how long an idle oversized dump (> MaxDumpBytes)
 	// is kept so a subsequent NAR request can reuse the dump that narinfo computed.
 	defaultOversizedTTL = 30 * time.Second
@@ -137,7 +132,6 @@ func New(storeDir string) *Server {
 		DumpTTL:            defaultDumpTTL,
 		MaxDumpBytes:       defaultMaxDumpBytes,
 		MaxConcurrentDumps: defaultMaxConcurrentDumps,
-		DumpWaitTimeout:    defaultDumpWaitTimeout,
 		dumps:              map[string]*dumpCall{},
 		Log:                log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
 	}
@@ -336,26 +330,12 @@ func (s *Server) acquireDumpSlot(ctx context.Context) (func(), error) {
 		s.dumpSem = make(chan struct{}, limit)
 	}
 	sem := s.dumpSem
-	waitTimeout := s.DumpWaitTimeout
-	if waitTimeout <= 0 {
-		waitTimeout = defaultDumpWaitTimeout
-	}
 	s.mu.Unlock()
-
-	waitCtx := ctx
-	var cancel context.CancelFunc
-	if waitTimeout > 0 {
-		waitCtx, cancel = context.WithTimeout(ctx, waitTimeout)
-		defer cancel()
-	}
 
 	select {
 	case sem <- struct{}{}:
 		return func() { <-sem }, nil
-	case <-waitCtx.Done():
-		if errors.Is(waitCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			return nil, context.DeadlineExceeded
-		}
+	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
@@ -467,9 +447,6 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 	for {
 		s.mu.Lock()
 		s.evictLocked(time.Now())
-		if s.dumps == nil {
-			s.dumps = map[string]*dumpCall{}
-		}
 		c, ok := s.dumps[path]
 		if !ok {
 			c = &dumpCall{done: make(chan struct{})}
@@ -520,11 +497,22 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 		}
 
 		c.res, c.err = res, err
+		c.oversized = res.size > limit
+
 		s.mu.Lock()
 		if err != nil {
 			delete(s.dumps, path)
-		} else if res.size <= limit {
-			s.dumpBytes += res.size
+		} else {
+			if c.oversized {
+				// Retain at most one idle oversized dump at any time to bound disk usage.
+				for p, old := range s.dumps {
+					if p != path && old.oversized && old.refs == 0 {
+						s.dropLocked(p, old)
+					}
+				}
+			} else {
+				s.dumpBytes += res.size
+			}
 		}
 		s.mu.Unlock()
 		close(c.done)
@@ -570,14 +558,14 @@ func (s *Server) evictLocked(now time.Time) {
 			continue
 		}
 		maxAge := ttl
-		if c.res.size > limit {
+		if c.oversized {
 			maxAge = oversizedTTL
 		}
 		if now.Sub(c.used) >= maxAge {
 			s.dropLocked(path, c)
 			continue
 		}
-		if c.res.size <= limit {
+		if !c.oversized {
 			idle = append(idle, path)
 		}
 	}
@@ -599,11 +587,7 @@ func (s *Server) evictLocked(now time.Time) {
 // Callers must hold s.mu.
 func (s *Server) dropLocked(path string, c *dumpCall) {
 	delete(s.dumps, path)
-	limit := s.MaxDumpBytes
-	if limit <= 0 {
-		limit = defaultMaxDumpBytes
-	}
-	if c.res.size <= limit {
+	if !c.oversized {
 		s.dumpBytes -= c.res.size
 	}
 	if c.res.file != "" {

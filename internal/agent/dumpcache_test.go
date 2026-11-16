@@ -548,7 +548,7 @@ func TestSmallPathNotEvictedByOversizedDump(t *testing.T) {
 	}
 }
 
-func TestDumpWaitTimeoutReturns503(t *testing.T) {
+func TestOversizedDumpsDoNotAccumulateOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	p1 := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-p1")
 	p2 := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-p2")
@@ -556,45 +556,65 @@ func TestDumpWaitTimeoutReturns503(t *testing.T) {
 	mustDir(t, p2)
 
 	s := newServer(t, dir)
-	s.MaxConcurrentDumps = 1
-	s.DumpWaitTimeout = 50 * time.Millisecond
-
-	p1Started := make(chan struct{})
-	p1Block := make(chan struct{})
+	s.MaxDumpBytes = 10
 
 	s.DumpFunc = func(path string, w io.Writer) error {
-		if path == p1 {
-			close(p1Started)
-			<-p1Block
-		}
-		_, err := w.Write([]byte("dump-" + path))
+		_, err := w.Write([]byte("01234567890123456789")) // 20 bytes (oversized)
 		return err
 	}
 
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	// Occupy the only dump slot with p1
-	go func() {
-		resp, err := http.Get(srv.URL + "/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar")
-		if err == nil {
-			resp.Body.Close()
-		}
-	}()
-
-	<-p1Started
-
-	// Request p2 without any client context deadline.
-	// Server's DumpWaitTimeout (50ms) must fire and return 503.
-	resp, err := http.Get(srv.URL + "/nar/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.nar")
+	// 1. Dump oversized p1 via narinfo
+	resp1, err := http.Get(srv.URL + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo")
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	resp1.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 Service Unavailable", resp.StatusCode)
+	// p1 is now the single idle oversized dump in cache
+	s.mu.Lock()
+	p1Call, p1Present := s.dumps[p1]
+	p1File := ""
+	if p1Present {
+		p1File = p1Call.res.file
+	}
+	s.mu.Unlock()
+	if !p1Present || p1File == "" {
+		t.Fatalf("p1 should be in cache after narinfo")
+	}
+	if _, err := os.Stat(p1File); err != nil {
+		t.Fatalf("p1 file should exist on disk: %v", err)
 	}
 
-	close(p1Block)
+	// 2. Dump a second oversized path p2 via narinfo
+	resp2, err := http.Get(srv.URL + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+
+	// Assert p1 was dropped and unlinked, so oversized dumps do not accumulate
+	s.mu.Lock()
+	_, p1StillInCache := s.dumps[p1]
+	p2Call, p2Present := s.dumps[p2]
+	p2File := ""
+	if p2Present {
+		p2File = p2Call.res.file
+	}
+	s.mu.Unlock()
+
+	if p1StillInCache {
+		t.Fatalf("p1 should have been evicted when new oversized p2 arrived")
+	}
+	if _, err := os.Stat(p1File); !os.IsNotExist(err) {
+		t.Fatalf("p1 file should have been removed from disk, err=%v", err)
+	}
+	if !p2Present || p2File == "" {
+		t.Fatalf("p2 should be in cache after narinfo")
+	}
+	if _, err := os.Stat(p2File); err != nil {
+		t.Fatalf("p2 file should exist on disk: %v", err)
+	}
 }

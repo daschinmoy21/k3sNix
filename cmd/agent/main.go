@@ -25,7 +25,6 @@ func main() {
 		dumpTTL            = flag.Duration("dump-ttl", 5*time.Minute, "how long an idle NAR dump stays cached")
 		dumpBytes          = flag.Int64("dump-cache-bytes", 2<<30, "cap on the total size of cached NAR dumps")
 		maxConcurrentDumps = flag.Int("max-concurrent-dumps", 4, "cap on concurrent in-flight NAR dumps")
-		dumpWaitTimeout    = flag.Duration("dump-wait-timeout", 30*time.Second, "how long a request waits for a dump concurrency slot before returning 503")
 		origin             = flag.String("origin", "", "upstream origin cache base URL for /v1/origin_probe")
 		seedByNode         = flag.Bool("seed-by-node", false, "seed the store from the label closure according to NODE_NAME")
 		seedLabel          = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
@@ -48,7 +47,6 @@ func main() {
 	s.DumpTTL = *dumpTTL
 	s.MaxDumpBytes = *dumpBytes
 	s.MaxConcurrentDumps = *maxConcurrentDumps
-	s.DumpWaitTimeout = *dumpWaitTimeout
 	s.Origin = *origin
 	s.MaxOriginNARBytes = *originNAR
 	if *catOnly && *catalog == "" {
