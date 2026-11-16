@@ -481,3 +481,120 @@ func TestOversizedDumpReusedByNarAfterNarinfo(t *testing.T) {
 		t.Fatalf("DumpFunc executed %d times, want 1 (oversized dump was not reused)", got)
 	}
 }
+
+func TestSmallPathNotEvictedByOversizedDump(t *testing.T) {
+	dir := t.TempDir()
+	pLarge := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-large")
+	pSmall := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-small")
+	mustDir(t, pLarge)
+	mustDir(t, pSmall)
+
+	s := newServer(t, dir)
+	// MaxDumpBytes is 10 bytes.
+	// pLarge is 20 bytes (oversized).
+	// pSmall is 4 bytes (small).
+	s.MaxDumpBytes = 10
+	s.DumpTTL = 500 * time.Millisecond
+
+	var largeDumps, smallDumps atomic.Int32
+	s.DumpFunc = func(path string, w io.Writer) error {
+		if path == pLarge {
+			largeDumps.Add(1)
+			_, err := w.Write([]byte("01234567890123456789")) // 20 bytes
+			return err
+		}
+		smallDumps.Add(1)
+		_, err := w.Write([]byte("1234")) // 4 bytes
+		return err
+	}
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// 1. Client requests narinfo for oversized path
+	resp, err := http.Get(srv.URL + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// 2. Client requests narinfo for small path
+	resp, err = http.Get(srv.URL + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.narinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// 3. Client requests NAR for small path - must reuse the dump from step 2!
+	resp, err = http.Get(srv.URL + "/nar/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.nar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// 4. Client requests NAR for oversized path - must reuse the dump from step 1!
+	resp, err = http.Get(srv.URL + "/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// Assert BOTH were dumped exactly ONCE
+	if got := smallDumps.Load(); got != 1 {
+		t.Fatalf("small path dumped %d times, want 1 (small dump was evicted prematurely)", got)
+	}
+	if got := largeDumps.Load(); got != 1 {
+		t.Fatalf("oversized path dumped %d times, want 1", got)
+	}
+}
+
+func TestDumpWaitTimeoutReturns503(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-p1")
+	p2 := filepath.Join(dir, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-p2")
+	mustDir(t, p1)
+	mustDir(t, p2)
+
+	s := newServer(t, dir)
+	s.MaxConcurrentDumps = 1
+	s.DumpWaitTimeout = 50 * time.Millisecond
+
+	p1Started := make(chan struct{})
+	p1Block := make(chan struct{})
+
+	s.DumpFunc = func(path string, w io.Writer) error {
+		if path == p1 {
+			close(p1Started)
+			<-p1Block
+		}
+		_, err := w.Write([]byte("dump-" + path))
+		return err
+	}
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// Occupy the only dump slot with p1
+	go func() {
+		resp, err := http.Get(srv.URL + "/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar")
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	<-p1Started
+
+	// Request p2 without any client context deadline.
+	// Server's DumpWaitTimeout (50ms) must fire and return 503.
+	resp, err := http.Get(srv.URL + "/nar/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.nar")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 Service Unavailable", resp.StatusCode)
+	}
+
+	close(p1Block)
+}
