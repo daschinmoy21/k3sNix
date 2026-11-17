@@ -479,13 +479,7 @@ func TestCacheInfoHealthMetrics(t *testing.T) {
 	metrics, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	m := string(metrics)
-	for _, want := range []string{
-		"k3snix_nar_served",
-		"k3snix_nar_bytes_served",
-		"k3snix_store_paths",
-		"k3snix_dump_slots_in_use",
-		"k3snix_dump_slot_timeouts",
-	} {
+	for _, want := range []string{"k3snix_nar_served", "k3snix_nar_bytes_served", "k3snix_store_paths"} {
 		if !strings.Contains(m, want) {
 			t.Fatalf("metrics missing %q: %s", want, m)
 		}

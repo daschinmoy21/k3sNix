@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"io"
 	"log"
@@ -19,43 +18,37 @@ const probeTimeout = 30 * time.Second
 
 func main() {
 	var (
-		listen             = flag.String("listen", ":9860", "http listen address")
-		store              = flag.String("store", "/nix/store", "nix store directory")
-		catalog            = flag.String("catalog", "", "directory of closure JSON files")
-		ttl                = flag.Duration("ttl", 2*time.Second, "store listing TTL")
-		dumpTTL            = flag.Duration("dump-ttl", 5*time.Minute, "how long an idle NAR dump stays cached")
-		dumpBytes          = flag.Int64("dump-cache-bytes", 2<<30, "cap on the total size of cached NAR dumps")
-		maxConcurrentDumps = flag.Int("max-concurrent-dumps", 4, "cap on concurrent in-flight NAR dumps (default 4; extra requests wait or return 503 on timeout)")
-		origin             = flag.String("origin", "", "upstream origin cache base URL for /v1/origin_probe")
-		seedByNode         = flag.Bool("seed-by-node", false, "seed the store from the label closure according to NODE_NAME")
-		seedLabel          = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
-		probeURL           = flag.String("probe-url", "", "one-shot client: GET this URL (POST with -probe-body), print the response body, exit")
-		probeBody          = flag.String("probe-body", "", "request body for -probe-url; empty body sends GET")
-		maxReqBody         = flag.Int64("max-request-bytes", 16<<20, "cap on a /v1/missing_bytes request body")
-		originNAR          = flag.Int64("origin-max-nar-bytes", 1<<30, "cap on the NAR a /v1/origin_probe may download")
-		catOnly            = flag.Bool("catalog-only", false, "serve narinfo and NARs only for store paths in the catalog")
-		signKey            = flag.String("sign-key-file", "", "nix secret key file used to sign narinfo (nix key generate-secret)")
+		listen     = flag.String("listen", ":9860", "http listen address")
+		store      = flag.String("store", "/nix/store", "nix store directory")
+		catalog    = flag.String("catalog", "", "directory of closure JSON files")
+		ttl        = flag.Duration("ttl", 2*time.Second, "store listing TTL")
+		dumpTTL    = flag.Duration("dump-ttl", 5*time.Minute, "how long an idle NAR dump stays cached")
+		dumpBytes  = flag.Int64("dump-cache-bytes", 2<<30, "cap on the total size of cached NAR dumps")
+		maxDumps   = flag.Int("max-concurrent-dumps", 4, "cap on NAR dumps running at once")
+		dumpWait   = flag.Duration("dump-wait-timeout", 30*time.Second, "how long a request waits for a free dump slot before a 503")
+		origin     = flag.String("origin", "", "upstream origin cache base URL for /v1/origin_probe")
+		seedByNode = flag.Bool("seed-by-node", false, "seed the store from the label closure according to NODE_NAME")
+		seedLabel  = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
+		probeURL   = flag.String("probe-url", "", "one-shot client: GET this URL (POST with -probe-body), print the response body, exit")
+		probeBody  = flag.String("probe-body", "", "request body for -probe-url; empty body sends GET")
+		maxReqBody = flag.Int64("max-request-bytes", 16<<20, "cap on a /v1/missing_bytes request body")
+		originNAR  = flag.Int64("origin-max-nar-bytes", 1<<30, "cap on the NAR a /v1/origin_probe may download")
+		catOnly    = flag.Bool("catalog-only", false, "serve narinfo and NARs only for store paths in the catalog")
+		signKey    = flag.String("sign-key-file", "", "nix secret key file used to sign narinfo (nix key generate-secret)")
 	)
 	flag.Parse()
-
-	if *maxConcurrentDumps < 1 {
-		log.Fatalf("-max-concurrent-dumps must be at least 1, got %d", *maxConcurrentDumps)
-	}
 
 	if *probeURL != "" {
 		probe(*probeURL, *probeBody)
 		return
 	}
 
-	if n := agent.CleanStaleDumps(os.TempDir()); n > 0 {
-		log.Printf("cleaned %d stale NAR dump temp file(s)", n)
-	}
-
 	s := agent.New(*store)
 	s.Store.TTL = *ttl
 	s.DumpTTL = *dumpTTL
 	s.MaxDumpBytes = *dumpBytes
-	s.MaxConcurrentDumps = *maxConcurrentDumps
+	s.MaxConcurrentDumps = *maxDumps
+	s.DumpWaitTimeout = *dumpWait
 	s.Origin = *origin
 	s.MaxOriginNARBytes = *originNAR
 	if *catOnly && *catalog == "" {
@@ -86,7 +79,6 @@ func main() {
 	}
 
 	s.MaxRequestBytes = *maxReqBody
-	s.StartJanitor(context.Background(), 1*time.Minute)
 	srv := &http.Server{
 		Addr:              *listen,
 		Handler:           s.Handler(),
