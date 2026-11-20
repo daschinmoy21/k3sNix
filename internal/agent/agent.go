@@ -135,8 +135,12 @@ const (
 	defaultDumpWaitTimeout = 30 * time.Second
 )
 
-// errDumpBusy reports that no dump slot freed up in time.
-var errDumpBusy = errors.New("all dump slots busy")
+var (
+	// errDumpBusy reports that no dump slot freed up in time.
+	errDumpBusy = errors.New("all dump slots busy")
+	// errDumpPanicked is what waiters see when the leader's DumpFunc panics.
+	errDumpPanicked = errors.New("dump panicked")
+)
 
 // New returns a Server serving storeDir.
 func New(storeDir string) *Server {
@@ -429,9 +433,11 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 // Overlapping requests call DumpFunc once; waiters copy the file the leader
 // produced. An entry is never evicted while a caller holds it, however long
 // the dump took. A failed dump is dropped from the cache so the next request
-// dumps again. Only the leader takes a dump slot; if it cannot get one,
-// it and its waiters all fail with errDumpBusy. A waiter whose ctx ends
-// stops waiting; the dump carries on for the others.
+// dumps again. Only the leader takes a dump slot; if it cannot get one
+// within DumpWaitTimeout, it and its waiters all fail with errDumpBusy. The
+// leader keeps waiting for its slot when its own ctx ends, since waiters may
+// still want the dump and a finished dump stays cached for a retry. A
+// waiter whose ctx ends stops waiting; the dump carries on for the others.
 func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, func(), error) {
 	s.mu.Lock()
 	s.evictLocked(time.Now())
@@ -453,17 +459,31 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 		}
 	}
 
-	releaseSlot, err := s.acquireDumpSlot(ctx)
+	releaseSlot, err := s.acquireDumpSlot()
 	if err != nil {
-		c.err = err
-		s.mu.Lock()
-		delete(s.dumps, path)
-		s.mu.Unlock()
-		close(c.done)
+		s.finishDump(path, c, dumpResult{}, err)
 		return dumpResult{}, release, err
 	}
-	res, err := s.dumpOnce(path)
-	releaseSlot()
+	finished := false
+	defer func() {
+		if !finished {
+			// DumpFunc panicked: fail the waiters instead of leaving them
+			// blocked on done, and let the next request dump again.
+			s.finishDump(path, c, dumpResult{}, errDumpPanicked)
+		}
+	}()
+	res, err := func() (dumpResult, error) {
+		defer releaseSlot()
+		return s.dumpOnce(path)
+	}()
+	s.finishDump(path, c, res, err)
+	finished = true
+	return res, release, err
+}
+
+// finishDump records the leader's result on c and wakes its waiters. A
+// failed dump is dropped from the cache so the next request dumps again.
+func (s *Server) finishDump(path string, c *dumpCall, res dumpResult, err error) {
 	c.res, c.err = res, err
 	s.mu.Lock()
 	if err != nil {
@@ -473,13 +493,12 @@ func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, fu
 	}
 	s.mu.Unlock()
 	close(c.done)
-	return res, release, err
 }
 
 // acquireDumpSlot waits up to DumpWaitTimeout for one of MaxConcurrentDumps
 // slots and returns the func that gives it back. It returns errDumpBusy if
-// no slot frees up in time or ctx ends first.
-func (s *Server) acquireDumpSlot(ctx context.Context) (func(), error) {
+// no slot frees up in time.
+func (s *Server) acquireDumpSlot() (func(), error) {
 	s.dumpSemOnce.Do(func() {
 		n := s.MaxConcurrentDumps
 		if n <= 0 {
@@ -497,8 +516,6 @@ func (s *Server) acquireDumpSlot(ctx context.Context) (func(), error) {
 	case s.dumpSem <- struct{}{}:
 		return func() { <-s.dumpSem }, nil
 	case <-timer.C:
-		return nil, errDumpBusy
-	case <-ctx.Done():
 		return nil, errDumpBusy
 	}
 }
