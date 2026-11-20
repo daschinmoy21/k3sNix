@@ -69,15 +69,24 @@ the extender's trace and the fallback with the extender scaled to zero.
 
 Box 4, delta fetch and lazy mount. Build items:
 
-- [ ] Agent fetch path: resolve the missing set, then try peers first and the
+- [x] Agent fetch path: resolve the missing set, then try peers first and the
       origin second
-- [ ] NAR downloads verified against the narinfo hash before they become
+- [x] NAR downloads verified against the narinfo hash before they become
       visible; a partial NAR is never published
-- [ ] Concurrent fetches of one path coalesce into a single transfer
-- [ ] Fetch-side counters completed: origin bytes and requests, peer bytes,
+- [x] Concurrent fetches of one path coalesce into a single transfer
+- [x] Fetch-side counters completed: origin bytes and requests, peer bytes,
       local hits, and predicted versus actually fetched missing bytes
-- [ ] Materialization lands paths in `/nix/store` so the Phase 3 runtime can
+- [x] Materialization lands paths in `/nix/store` so the Phase 3 runtime can
       mount them; pod-start mount behaviour itself belongs to Phase 3
+
+`POST /v1/fetch` takes a catalog closure by id, label or root. NARs are
+checked against the catalog's narHash and narSize, which is stricter than the
+narinfo: a peer is never trusted, and a peer serving wrong bytes is skipped
+for the next source. `-materialize=dir` unpacks into the agent's store
+directory through a dot-named temp path and a rename; `-materialize=nix`
+imports through the nix daemon with `nix copy` from a staged one-path cache.
+Peers come from `-peers` and from the headless `k3snix-agent-peers` Service
+(`-peers-dns`).
 
 Exit criteria:
 
@@ -85,7 +94,7 @@ Exit criteria:
       warm node, and the decision is explained by logged scores
 - [ ] A scheduled node ends the run holding the closure, having fetched only the
       missing NARs, peers before origin, proven by counters and a store diff
-- [ ] The spec.md section 7 gates that touch these components pass: coalescing,
+- [x] The spec.md section 7 gates that touch these components pass: coalescing,
       no partial NAR visibility, and default scheduling on extender failure
 
 ## Phase 3 — runtime and benchmark

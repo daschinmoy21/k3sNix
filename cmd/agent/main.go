@@ -13,8 +13,9 @@ import (
 )
 
 // probeTimeout bounds the one-shot client so a wedged peer fails the e2e
-// smoke instead of hanging the kubectl exec forever.
-const probeTimeout = 30 * time.Second
+// smoke instead of hanging the kubectl exec forever. It covers a whole
+// /v1/fetch of a closure.
+const probeTimeout = 10 * time.Minute
 
 func main() {
 	var (
@@ -33,6 +34,11 @@ func main() {
 		originNAR  = flag.Int64("origin-max-nar-bytes", 1<<30, "cap on the NAR a /v1/origin_probe may download")
 		catOnly    = flag.Bool("catalog-only", false, "serve narinfo and NARs only for store paths in the catalog")
 		signKey    = flag.String("sign-key-file", "", "nix secret key file used to sign narinfo (nix key generate-secret)")
+		material   = flag.String("materialize", "", "enable /v1/fetch: \"dir\" unpacks NARs into -store, \"nix\" imports them with nix copy")
+		peers      = flag.String("peers", "", "comma-separated peer cache URLs /v1/fetch tries before the origin")
+		peersDNS   = flag.String("peers-dns", "", "DNS name whose addresses, except this node's, are peer caches")
+		peerPort   = flag.Int("peer-port", 9860, "agent port on the -peers-dns addresses")
+		workers    = flag.Int("fetch-workers", 4, "concurrent NAR downloads in one fetch")
 	)
 	flag.Parse()
 
@@ -65,6 +71,23 @@ func main() {
 		}
 		log.Printf("catalog loaded from %s", *catalog)
 	}
+	switch *material {
+	case "":
+	case "dir":
+		s.Materializer = agent.DirMaterializer{Dir: *store}
+	case "nix":
+		s.Materializer = agent.NixMaterializer{StoreDir: *store}
+	default:
+		log.Fatalf("-materialize %q: want dir or nix", *material)
+	}
+	for _, p := range strings.Split(*peers, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			s.Peers = append(s.Peers, p)
+		}
+	}
+	s.PeersDNS = *peersDNS
+	s.PeerPort = *peerPort
+	s.FetchWorkers = *workers
 	if *seedByNode {
 		seed(s, *seedLabel)
 	}
