@@ -33,10 +33,14 @@ const (
 // or root store path. Only catalog closures can be fetched: the catalog's
 // narHash and narSize are what every downloaded NAR is checked against, so
 // a peer never has to be trusted.
+//
+// PodUID, when set, makes the agent hold a GC root for that pod on the
+// closure once the fetch succeeds.
 type FetchReq struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Root  string `json:"root"`
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Root   string `json:"root"`
+	PodUID string `json:"pod_uid"`
 }
 
 // FetchedPath reports how one closure path reached the store.
@@ -61,6 +65,7 @@ type FetchResp struct {
 	OriginBytes    int64         `json:"origin_bytes"`
 	DurationMS     float64       `json:"duration_ms"`
 	Fetched        []FetchedPath `json:"fetched"`
+	GCRoot         string        `json:"gc_root,omitempty"`
 }
 
 // Materializer makes a verified NAR visible as a store path.
@@ -95,6 +100,8 @@ type fetchState struct {
 	fetchPredicted   int64
 	fetchFetched     int64
 	fetchVerifyFails int64
+	gcRuns           int64
+	gcRemovedBytes   int64
 }
 
 func (s *Server) resolveFetch(req FetchReq) (closure.Closure, error) {
@@ -141,12 +148,23 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.PodUID != "" && (s.RootsDir == "" || !podUID.MatchString(req.PodUID)) {
+		http.Error(w, fmt.Sprintf("cannot root pod %q: bad uid or no -gcroots-dir", req.PodUID), http.StatusBadRequest)
+		return
+	}
 	c, err := s.resolveFetch(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	s.gcMu.RLock()
+	defer s.gcMu.RUnlock()
 	resp, err := s.Fetch(r.Context(), c)
+	if err == nil && req.PodUID != "" {
+		if err = s.addRoot(req.PodUID, c); err == nil {
+			resp.GCRoot = filepath.Join(s.RootsDir, req.PodUID)
+		}
+	}
 	if err != nil {
 		s.mu.Lock()
 		s.fetchFailures++
@@ -557,4 +575,8 @@ func (s *Server) writeFetchMetrics(w io.Writer) {
 	fmt.Fprintf(w, "k3snix_fetch_predicted_bytes %d\n", f.fetchPredicted)
 	fmt.Fprintf(w, "k3snix_fetch_fetched_bytes %d\n", f.fetchFetched)
 	fmt.Fprintf(w, "k3snix_fetch_verify_failures %d\n", f.fetchVerifyFails)
+	roots, _ := s.roots()
+	fmt.Fprintf(w, "k3snix_gc_roots %d\n", len(roots))
+	fmt.Fprintf(w, "k3snix_gc_runs %d\n", f.gcRuns)
+	fmt.Fprintf(w, "k3snix_gc_removed_bytes %d\n", f.gcRemovedBytes)
 }

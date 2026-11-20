@@ -102,16 +102,26 @@ Exit criteria:
 Box 5, runtime. The host store is the preferred design and nix-snapshotter an
 optional comparison run; see [evaluation.md](./evaluation.md). Build items:
 
-- [ ] Host-store delivery: pods run from a read-only host `/nix/store`, an
+- [x] Host-store delivery: pods run from a read-only host `/nix/store`, an
       init container has the agent fetch missing paths, and the agent holds a
       GC root per pod
 - [ ] Works on both K3s runtimes: containerd and docker (`--docker`)
 - [ ] Optional: nix-snapshotter live on K3s through the k3s-with-snapshotter
       module (the Phase 0 spike made real), pod rootfs assembled from store
       paths with no image copy
-- [ ] Pod writes never mutate `/nix/store`, and removing a pod never deletes
+- [x] Pod writes never mutate `/nix/store`, and removing a pod never deletes
       paths another pod requires
 - [ ] LRScheduler reimplemented as a Score plugin in `baselines/lrscheduler/`
+
+The workload template is `deploy/examples/hello-hoststore.yaml`. The init
+container posts `{"root", "pod_uid"}` to the node agent's `/v1/fetch`; after
+the fetch the agent links `-gcroots-dir/<pod uid>` to the closure root and
+removes the link once the pod's directory leaves `-kubelet-pods-dir`. On a
+`-materialize=dir` store `POST /v1/gc` deletes every catalog path no root
+needs; on a Nix node the roots sit under `/nix/var/nix/gcroots` and
+`nix-collect-garbage` honours them. The k3d smoke covers containerd only; the
+design has nothing runtime-specific, but `--docker` is still unverified, and
+`-materialize=nix` needs an agent image that ships `nix`.
 
 Box 6, benchmark. Build items:
 

@@ -32,6 +32,10 @@ Phase 2 so far:
   closure that the node lacks, from peer agents first and the origin second.
   Every NAR is verified against the catalog before it becomes a store path.
 
+- Host-store pods (`deploy/examples/hello-hoststore.yaml`): an init
+  container has the agent fetch the closure and hold a GC root for the pod,
+  and the app runs its store path from the node store mounted read-only.
+
 The bench (`cmd/bench`) is still a stub.
 
 ## Layout

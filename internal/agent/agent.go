@@ -86,6 +86,16 @@ type Server struct {
 	// means defaultFetchWorkers.
 	FetchWorkers int
 
+	// RootsDir holds one GC root symlink per pod, named by pod UID. Empty
+	// disables pod roots. PodsDir is the kubelet's pod directory; a root
+	// whose pod has no directory there is removed by Reconcile.
+	RootsDir string
+	PodsDir  string
+
+	// gcMu keeps /v1/gc from removing paths while a fetch has listed the
+	// store but not yet rooted its closure.
+	gcMu sync.RWMutex
+
 	fetchState
 
 	// catalogPaths maps a store basename to its catalog entry, so narinfo
@@ -174,6 +184,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/missing_bytes", s.handleMissing)
 	mux.HandleFunc("/v1/origin_probe", s.handleOriginProbe)
 	mux.HandleFunc("/v1/fetch", s.handleFetch)
+	mux.HandleFunc("/v1/gc", s.handleGC)
 	mux.HandleFunc("/nix-cache-info", s.handleCacheInfo)
 	mux.HandleFunc("/", s.handleCache)
 	return mux
