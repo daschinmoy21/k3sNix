@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -568,7 +569,7 @@ func TestDumpEvictionRemovesTempFile(t *testing.T) {
 		return err
 	}
 
-	res, release, err := s.dumpCoalesced(a)
+	res, release, err := s.dumpCoalesced(context.Background(), a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +581,7 @@ func TestDumpEvictionRemovesTempFile(t *testing.T) {
 	time.Sleep(30 * time.Millisecond) // outlive DumpTTL
 
 	// The next dump request sweeps the idle entry and unlinks its file.
-	_, release, err = s.dumpCoalesced(b)
+	_, release, err = s.dumpCoalesced(context.Background(), b)
 	if err != nil {
 		t.Fatal(err)
 	}

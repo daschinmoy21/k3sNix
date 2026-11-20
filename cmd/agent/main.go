@@ -13,8 +13,9 @@ import (
 )
 
 // probeTimeout bounds the one-shot client so a wedged peer fails the e2e
-// smoke instead of hanging the kubectl exec forever.
-const probeTimeout = 30 * time.Second
+// smoke instead of hanging the kubectl exec forever. It covers a whole
+// /v1/fetch of a closure.
+const probeTimeout = 10 * time.Minute
 
 func main() {
 	var (
@@ -24,6 +25,8 @@ func main() {
 		ttl        = flag.Duration("ttl", 2*time.Second, "store listing TTL")
 		dumpTTL    = flag.Duration("dump-ttl", 5*time.Minute, "how long an idle NAR dump stays cached")
 		dumpBytes  = flag.Int64("dump-cache-bytes", 2<<30, "cap on the total size of cached NAR dumps")
+		maxDumps   = flag.Int("max-concurrent-dumps", 4, "cap on NAR dumps running at once")
+		dumpWait   = flag.Duration("dump-wait-timeout", 30*time.Second, "how long a request waits for a free dump slot before a 503")
 		origin     = flag.String("origin", "", "upstream origin cache base URL for /v1/origin_probe")
 		seedByNode = flag.Bool("seed-by-node", false, "seed the store from the label closure according to NODE_NAME")
 		seedLabel  = flag.String("seed-label", "e2e", "closure label used when -seed-by-node is set")
@@ -33,6 +36,14 @@ func main() {
 		originNAR  = flag.Int64("origin-max-nar-bytes", 1<<30, "cap on the NAR a /v1/origin_probe may download")
 		catOnly    = flag.Bool("catalog-only", false, "serve narinfo and NARs only for store paths in the catalog")
 		signKey    = flag.String("sign-key-file", "", "nix secret key file used to sign narinfo (nix key generate-secret)")
+		material   = flag.String("materialize", "", "enable /v1/fetch: \"dir\" unpacks NARs into -store, \"nix\" imports them with nix copy")
+		peers      = flag.String("peers", "", "comma-separated peer cache URLs /v1/fetch tries before the origin")
+		peersDNS   = flag.String("peers-dns", "", "DNS name whose addresses, except this node's, are peer caches")
+		peerPort   = flag.Int("peer-port", 9860, "agent port on the -peers-dns addresses")
+		workers    = flag.Int("fetch-workers", 4, "concurrent NAR downloads in one fetch")
+		rootsDir   = flag.String("gcroots-dir", "", "directory of per-pod GC roots (under /nix/var/nix/gcroots with -materialize=nix)")
+		podsDir    = flag.String("kubelet-pods-dir", "", "the kubelet's pod directory; roots of pods missing from it are removed")
+		reconcile  = flag.Duration("gcroots-interval", 10*time.Second, "how often roots of deleted pods are removed")
 	)
 	flag.Parse()
 
@@ -45,6 +56,8 @@ func main() {
 	s.Store.TTL = *ttl
 	s.DumpTTL = *dumpTTL
 	s.MaxDumpBytes = *dumpBytes
+	s.MaxConcurrentDumps = *maxDumps
+	s.DumpWaitTimeout = *dumpWait
 	s.Origin = *origin
 	s.MaxOriginNARBytes = *originNAR
 	if *catOnly && *catalog == "" {
@@ -64,6 +77,28 @@ func main() {
 			log.Fatalf("catalog %s: %v", *catalog, err)
 		}
 		log.Printf("catalog loaded from %s", *catalog)
+	}
+	switch *material {
+	case "":
+	case "dir":
+		s.Materializer = agent.DirMaterializer{Dir: *store}
+	case "nix":
+		s.Materializer = agent.NixMaterializer{StoreDir: *store}
+	default:
+		log.Fatalf("-materialize %q: want dir or nix", *material)
+	}
+	for _, p := range strings.Split(*peers, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			s.Peers = append(s.Peers, p)
+		}
+	}
+	s.PeersDNS = *peersDNS
+	s.PeerPort = *peerPort
+	s.FetchWorkers = *workers
+	s.RootsDir = *rootsDir
+	s.PodsDir = *podsDir
+	if *rootsDir != "" && *podsDir != "" {
+		go s.RunReconciler(*reconcile, nil)
 	}
 	if *seedByNode {
 		seed(s, *seedLabel)

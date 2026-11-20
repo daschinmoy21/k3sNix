@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -45,12 +46,30 @@ type Server struct {
 	// used first. Entries a caller still holds are never evicted, so the
 	// total can exceed the cap while they are in use. Zero means
 	// defaultMaxDumpBytes.
+	//
+	// A single dump larger than the cap is dropped as soon as its last
+	// caller releases it. For a path the catalog has no narHash for, the
+	// narinfo request and the NAR request that follows each dump it, so
+	// such a path is dumped twice per fetch. This is accepted: Nix asks for
+	// every narinfo in a closure before any NAR, so keeping large dumps
+	// around until the NAR request would mean holding several of them past
+	// the cap, and MaxConcurrentDumps already bounds the cost.
 	MaxDumpBytes int64
 
+	// MaxConcurrentDumps bounds how many dumps run at once. A request for
+	// a path that is already being dumped waits on that dump and does not
+	// take a slot. Zero means defaultMaxConcurrentDumps.
+	MaxConcurrentDumps int
+
+	// DumpWaitTimeout bounds how long a request waits for a free dump slot.
+	// A request that times out, and any request waiting on the same path,
+	// is answered 503. Zero means defaultDumpWaitTimeout.
+	DumpWaitTimeout time.Duration
+
 	// Origin is the base URL of the upstream cache that /v1/origin_probe
-	// measures. Empty disables probing: the endpoint answers 400 and the
-	// origin counters stay untouched. Nothing else on this server ever
-	// contacts the origin.
+	// measures and /v1/fetch falls back to after the peers. Empty disables
+	// probing: the endpoint answers 400 and the origin counters stay
+	// untouched.
 	Origin string
 
 	// MaxRequestBytes caps a /v1/missing_bytes request body; larger bodies get
@@ -72,6 +91,32 @@ type Server struct {
 	// SignKey, when set, adds a nix Sig line to every narinfo.
 	SignKey *SigningKey
 
+	// Materializer installs fetched NARs; nil disables /v1/fetch.
+	Materializer Materializer
+
+	// Peers are peer cache base URLs /v1/fetch tries before the origin, in
+	// order. PeersDNS, when set, is resolved on every fetch and each address
+	// other than this node's own is tried next, on PeerPort.
+	Peers    []string
+	PeersDNS string
+	PeerPort int
+
+	// FetchWorkers bounds concurrent path downloads in one fetch. Zero
+	// means defaultFetchWorkers.
+	FetchWorkers int
+
+	// RootsDir holds one GC root symlink per pod, named by pod UID. Empty
+	// disables pod roots. PodsDir is the kubelet's pod directory; a root
+	// whose pod has no directory there is removed by Reconcile.
+	RootsDir string
+	PodsDir  string
+
+	// gcMu keeps /v1/gc from removing paths while a fetch has listed the
+	// store but not yet rooted its closure.
+	gcMu sync.RWMutex
+
+	fetchState
+
 	// catalogPaths maps a store basename to its catalog entry, so narinfo
 	// and NAR serving can find references, narHash and narSize for a path.
 	catalogPaths map[string]closure.Path
@@ -79,6 +124,8 @@ type Server struct {
 	mu                   sync.Mutex
 	dumps                map[string]*dumpCall
 	dumpBytes            int64 // total size of the finished dumps in dumps
+	dumpSemOnce          sync.Once
+	dumpSem              chan struct{} // one token per running dump
 	narServed            int64
 	bytesServed          int64
 	narHashMismatches    int64
@@ -108,17 +155,30 @@ const (
 	defaultDumpTTL = 5 * time.Minute
 	// defaultMaxDumpBytes applies when Server.MaxDumpBytes is unset.
 	defaultMaxDumpBytes = 2 << 30
+	// defaultMaxConcurrentDumps applies when Server.MaxConcurrentDumps is unset.
+	defaultMaxConcurrentDumps = 4
+	// defaultDumpWaitTimeout applies when Server.DumpWaitTimeout is unset.
+	defaultDumpWaitTimeout = 30 * time.Second
+)
+
+var (
+	// errDumpBusy reports that no dump slot freed up in time.
+	errDumpBusy = errors.New("all dump slots busy")
+	// errDumpPanicked is what waiters see when the leader's DumpFunc panics.
+	errDumpPanicked = errors.New("dump panicked")
 )
 
 // New returns a Server serving storeDir.
 func New(storeDir string) *Server {
 	return &Server{
-		Store:        inventory.New(storeDir),
-		DumpFunc:     NARStoreDump,
-		DumpTTL:      defaultDumpTTL,
-		MaxDumpBytes: defaultMaxDumpBytes,
-		dumps:        map[string]*dumpCall{},
-		Log:          log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
+		Store:              inventory.New(storeDir),
+		DumpFunc:           NARStoreDump,
+		DumpTTL:            defaultDumpTTL,
+		MaxDumpBytes:       defaultMaxDumpBytes,
+		MaxConcurrentDumps: defaultMaxConcurrentDumps,
+		DumpWaitTimeout:    defaultDumpWaitTimeout,
+		dumps:              map[string]*dumpCall{},
+		Log:                log.New(os.Stderr, "k3snix-agent ", log.LstdFlags),
 	}
 }
 
@@ -157,6 +217,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/v1/missing_bytes", s.handleMissing)
 	mux.HandleFunc("/v1/origin_probe", s.handleOriginProbe)
+	mux.HandleFunc("/v1/fetch", s.handleFetch)
+	mux.HandleFunc("/v1/gc", s.handleGC)
 	mux.HandleFunc("/nix-cache-info", s.handleCacheInfo)
 	mux.HandleFunc("/", s.handleCache)
 	return mux
@@ -181,6 +243,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "k3snix_origin_requests %d\n", originRequests)
 	fmt.Fprintf(w, "k3snix_origin_bytes %d\n", originBytes)
 	fmt.Fprintf(w, "k3snix_origin_verify_failures %d\n", verifyFailures)
+	s.writeFetchMetrics(w)
 }
 
 // defaultMaxRequestBytes applies when Server.MaxRequestBytes is unset.
@@ -322,11 +385,11 @@ func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash strin
 	}
 	narHash, narSize := meta.NarHashNix32(), int64(meta.NarSize)
 	if narHash == "" || narSize == 0 {
-		res, release, err := s.dumpCoalesced(path)
+		res, release, err := s.dumpCoalesced(r.Context(), path)
 		defer release()
 		if err != nil {
 			s.logError("narinfo", path, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), dumpErrStatus(err))
 			return
 		}
 		narHash, narSize = res.hash, res.size
@@ -361,11 +424,11 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 		http.NotFound(w, r)
 		return
 	}
-	res, release, err := s.dumpCoalesced(path)
+	res, release, err := s.dumpCoalesced(r.Context(), path)
 	defer release()
 	if err != nil {
 		s.logError("nar", path, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), dumpErrStatus(err))
 		return
 	}
 	if want := meta.NarHashNix32(); want != "" &&
@@ -399,8 +462,12 @@ func (s *Server) serveNAR(w http.ResponseWriter, r *http.Request, hash string) {
 // Overlapping requests call DumpFunc once; waiters copy the file the leader
 // produced. An entry is never evicted while a caller holds it, however long
 // the dump took. A failed dump is dropped from the cache so the next request
-// dumps again.
-func (s *Server) dumpCoalesced(path string) (dumpResult, func(), error) {
+// dumps again. Only the leader takes a dump slot; if it cannot get one
+// within DumpWaitTimeout, it and its waiters all fail with errDumpBusy. The
+// leader keeps waiting for its slot when its own ctx ends, since waiters may
+// still want the dump and a finished dump stays cached for a retry. A
+// waiter whose ctx ends stops waiting; the dump carries on for the others.
+func (s *Server) dumpCoalesced(ctx context.Context, path string) (dumpResult, func(), error) {
 	s.mu.Lock()
 	s.evictLocked(time.Now())
 	c, ok := s.dumps[path]
@@ -413,11 +480,39 @@ func (s *Server) dumpCoalesced(path string) (dumpResult, func(), error) {
 	release := func() { s.release(c) }
 
 	if ok {
-		<-c.done
-		return c.res, release, c.err
+		select {
+		case <-c.done:
+			return c.res, release, c.err
+		case <-ctx.Done():
+			return dumpResult{}, release, ctx.Err()
+		}
 	}
 
-	res, err := s.dumpOnce(path)
+	releaseSlot, err := s.acquireDumpSlot()
+	if err != nil {
+		s.finishDump(path, c, dumpResult{}, err)
+		return dumpResult{}, release, err
+	}
+	finished := false
+	defer func() {
+		if !finished {
+			// DumpFunc panicked: fail the waiters instead of leaving them
+			// blocked on done, and let the next request dump again.
+			s.finishDump(path, c, dumpResult{}, errDumpPanicked)
+		}
+	}()
+	res, err := func() (dumpResult, error) {
+		defer releaseSlot()
+		return s.dumpOnce(path)
+	}()
+	s.finishDump(path, c, res, err)
+	finished = true
+	return res, release, err
+}
+
+// finishDump records the leader's result on c and wakes its waiters. A
+// failed dump is dropped from the cache so the next request dumps again.
+func (s *Server) finishDump(path string, c *dumpCall, res dumpResult, err error) {
 	c.res, c.err = res, err
 	s.mu.Lock()
 	if err != nil {
@@ -427,7 +522,40 @@ func (s *Server) dumpCoalesced(path string) (dumpResult, func(), error) {
 	}
 	s.mu.Unlock()
 	close(c.done)
-	return res, release, err
+}
+
+// acquireDumpSlot waits up to DumpWaitTimeout for one of MaxConcurrentDumps
+// slots and returns the func that gives it back. It returns errDumpBusy if
+// no slot frees up in time.
+func (s *Server) acquireDumpSlot() (func(), error) {
+	s.dumpSemOnce.Do(func() {
+		n := s.MaxConcurrentDumps
+		if n <= 0 {
+			n = defaultMaxConcurrentDumps
+		}
+		s.dumpSem = make(chan struct{}, n)
+	})
+	wait := s.DumpWaitTimeout
+	if wait <= 0 {
+		wait = defaultDumpWaitTimeout
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case s.dumpSem <- struct{}{}:
+		return func() { <-s.dumpSem }, nil
+	case <-timer.C:
+		return nil, errDumpBusy
+	}
+}
+
+// dumpErrStatus maps a dumpCoalesced error to an HTTP status: 503 when the
+// request gave up waiting, 500 when the dump itself failed.
+func dumpErrStatus(err error) int {
+	if errors.Is(err, errDumpBusy) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
 }
 
 // release drops one caller's hold on c and sweeps the cache, so a dump that

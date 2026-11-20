@@ -3,8 +3,8 @@
 Phase 1 covers the first two boxes of the architecture deck: (1) Nix closure
 analysis with content-addressed paths and a pinned manifest, and (2) initializing
 the cache inventory across the local, peer, and origin tiers. It delivers the
-data plane only. Scheduling and the delta fetch arrive in Phase 2, the runtime
-and the benchmark in Phase 3.
+data plane only. Scheduling, the delta fetch, the runtime
+and the benchmark arrive in Phase 2.
 
 The operating rule for this phase: **serve and count, never fetch on a pod
 start.**
@@ -32,8 +32,8 @@ Out of scope (guard rails against creep):
 
 - Scheduler extender, scoring, any kube-scheduler integration (Phase 2)
 - Fetching missing NARs from peers or origin (Phase 2 delta fetch)
-- nix-snapshotter, pod rootfs, lazy mounts (Phase 3)
-- Benchmark numbers, crossover sweeps, traffic shaping (Phase 3 and the
+- nix-snapshotter, pod rootfs, lazy mounts (Phase 2)
+- Benchmark numbers, crossover sweeps, traffic shaping (Phase 2 and the
   harness phases of spec.md)
 
 ## Acceptance criteria
@@ -128,7 +128,7 @@ Deviations from the plan, kept deliberately:
   holds while it writes a path. It does not read the nix database; that
   belongs with materialization in Phase 2.
 
-Open before Phase 3: the nix-snapshotter spike (see
+Open during Phase 2: the nix-snapshotter spike (see
 [phases.md](./phases.md)) has not been run.
 
 ## Build order
@@ -210,7 +210,7 @@ flowchart TD
 
 Solid edges are live in Phase 1. Dashed edges are later phases, drawn to show
 where the system is heading: the scheduler extender and the delta fetch arrive
-in Phase 2, the nix-snapshotter runtime in Phase 3. kubelet and containerd are
+in Phase 2, the runtime later in Phase 2. kubelet and containerd are
 untouched throughout.
 
 ```mermaid
@@ -255,7 +255,7 @@ flowchart TB
     AG2 -.->|"Phase 2: delta fetch"| ORIGIN
 
     EXT["Scheduler extender, port 9876<br/>scores nodes 0 to 10"] -.->|"Phase 2: missing_bytes queries"| AG1
-    RUNTIME["nix-snapshotter runtime<br/>mount store paths, no image copy"] -.->|"Phase 3"| CLUSTER
+    RUNTIME["nix-snapshotter runtime<br/>mount store paths, no image copy"] -.->|"Phase 2"| CLUSTER
 ```
 
 ## References

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func TestSlowDumpSurvivesSweep(t *testing.T) {
 	results := make([]held, 2)
 	get := func(i int) {
 		defer wg.Done()
-		res, release, err := s.dumpCoalesced(a)
+		res, release, err := s.dumpCoalesced(context.Background(), a)
 		results[i] = held{res, release, err}
 	}
 	wg.Add(1)
@@ -52,7 +53,7 @@ func TestSlowDumpSurvivesSweep(t *testing.T) {
 	wg.Wait()
 
 	// Another path's request sweeps the cache while a is still held.
-	_, releaseB, err := s.dumpCoalesced(b)
+	_, releaseB, err := s.dumpCoalesced(context.Background(), b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestSlowDumpSurvivesSweep(t *testing.T) {
 
 	// Once released and idle past the TTL, the entry goes.
 	time.Sleep(3 * s.DumpTTL)
-	_, releaseB, err = s.dumpCoalesced(b)
+	_, releaseB, err = s.dumpCoalesced(context.Background(), b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestDumpCacheByteCap(t *testing.T) {
 	}
 	dump := func(name string) (dumpResult, func()) {
 		t.Helper()
-		res, release, err := s.dumpCoalesced(paths[name])
+		res, release, err := s.dumpCoalesced(context.Background(), paths[name])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +146,7 @@ func TestDumpLargerThanCapIsServedThenDropped(t *testing.T) {
 		_, err := w.Write([]byte("too-big"))
 		return err
 	}
-	res, release, err := s.dumpCoalesced(p)
+	res, release, err := s.dumpCoalesced(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
 	}

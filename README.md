@@ -20,9 +20,24 @@ for the acceptance checklist and measured results, and
   and `POST /v1/origin_probe` to measure it
 - A three-node k3d smoke and a demo on the real closures
 
-The scheduler extender (`cmd/extender`) is a Phase 2 stub. The bench
-(`cmd/bench`) implements the byte comparison. Nothing fetches store paths on a
-pod start yet.
+Phase 2 so far:
+
+- `k3snix-extender`: a kube-scheduler extender that scores each feasible
+  node 0 to 10 by the share of the pod's closure it already holds. Pods opt
+  in with `schedulerName: k3snix` and name their software with the
+  `k3snix.io/root` annotation (`deploy/30-extender.yaml`,
+  `deploy/31-scheduler.yaml`).
+
+- `POST /v1/fetch` on the agent: installs the store paths of a catalog
+  closure that the node lacks, from peer agents first and the origin second.
+  Every NAR is verified against the catalog before it becomes a store path.
+
+- Host-store pods (`deploy/examples/hello-hoststore.yaml`): an init
+  container has the agent fetch the closure and hold a GC root for the pod,
+  and the app runs its store path from the node store mounted read-only.
+
+The bench (`cmd/bench`) implements the store-path versus OCI layer byte
+comparison (`docs/comparison.md`).
 
 ## Layout
 

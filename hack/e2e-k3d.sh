@@ -2,9 +2,10 @@
 # hack/e2e-k3d.sh — k3d smoke test for the k3snix data plane.
 #
 # Seeding strategy:
-#   k3d does not share the host nix store with agent emptyDirs: every agent
-#   pod gets a fresh emptyDir at /data/store, so the fixture closure is
-#   seeded into it at startup, by node name (-seed-by-node -seed-label=e2e):
+#   k3d does not share the host nix store with the agents: every agent's
+#   store is /var/lib/k3snix/store inside its own k3d node, so the fixture
+#   closure is seeded into it at startup, by node name (-seed-by-node
+#   -seed-label=e2e):
 #     * node name ending in server-0 (or containing "warm") -> warm: every path
 #     * node name ending in -agent-0 (or containing "mid")   -> mid: first half
 #     * anything else                                       -> cold: no paths
@@ -30,6 +31,23 @@
 # Catalog: the smoke creates the catalog ConfigMap from the fixture before
 # applying the manifests (this is the single documented command for it):
 #   kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json=testdata/e2e/e2e.json
+# The smoke adds the pinned manifests to it, which /v1/fetch needs.
+#
+# Delta fetch: the cold agent fetches churn-v1 (all from the origin), the
+# mid agent then fetches it again (all from the cold agent, a peer) and
+# churn-v2 (only the delta), and two concurrent fetches of hello on the warm
+# agent download each path once. Every fetched path must dump to the
+# manifest narHash.
+#
+# Host store: hello and coreutils pods are placed by the k3snix scheduler,
+# get their closure from an init container that calls /v1/fetch, and run
+# from the node store mounted read-only at /nix/store. Deleting hello drops
+# its GC root, and /v1/gc then removes hello but nothing coreutils needs.
+#
+# Scheduler: a second kube-scheduler (profile k3snix) calls the extender,
+# whose catalog holds the fixture and the pinned manifests. A pod naming the
+# fixture root must bind to the warm node, the extender's trace must explain
+# why, and with the extender gone a k3snix pod must still be scheduled.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -125,6 +143,14 @@ fi
 echo "== importing image k3snix:dev into $CLUSTER"
 k3d image import k3snix:dev -c "$CLUSTER"
 
+# The second scheduler runs the upstream kube-scheduler of the server's
+# version, pulled on the host and imported like the agent image.
+k8s_version=$(kubectl version -o json | jq -r '.serverVersion.gitVersion' | sed 's/+.*//')
+scheduler_image="registry.k8s.io/kube-scheduler:$k8s_version"
+echo "== importing $scheduler_image into $CLUSTER"
+docker pull -q "$scheduler_image" >/dev/null
+k3d image import "$scheduler_image" -c "$CLUSTER"
+
 echo "== waiting for 3 Ready nodes"
 ready=0
 for _ in $(seq 1 60); do
@@ -145,16 +171,21 @@ kubectl -n kube-system rollout status deployment/coredns --timeout=120s
 
 echo "== applying manifests"
 kubectl apply -f deploy/00-namespace.yaml
-kubectl -n k3snix create configmap k3snix-catalog --from-file=e2e.json="$FIXTURE"
+kubectl -n k3snix create configmap k3snix-catalog \
+  --from-file="$CLOSURES_DIR/manifests/" --from-file=e2e.json="$FIXTURE"
 kubectl -n k3snix create configmap k3snix-origin-catalog --from-file="$CLOSURES_DIR/manifests/"
 kubectl -n k3snix create secret generic k3snix-origin-key --from-file=secret-key="$tmp/origin.key"
+kubectl -n k3snix create configmap k3snix-scheduler-catalog \
+  --from-file="$CLOSURES_DIR/manifests/" --from-file=e2e.json="$FIXTURE"
+mkdir "$tmp/deploy"
+cp deploy/*.yaml "$tmp/deploy/"
+sed -i "s#registry.k8s.io/kube-scheduler:v[0-9.]*#$scheduler_image#" "$tmp/deploy/31-scheduler.yaml"
 if [ "$FALLBACK" = 1 ]; then
-  sed 's#http://k3snix-origin.k3snix.svc.cluster.local:9877#http://host.k3d.internal:9877#' \
-    deploy/10-agent-daemonset.yaml >"$tmp/agent-ds.yaml"
-  kubectl apply -f "$tmp/agent-ds.yaml"
-else
-  kubectl apply -f deploy/
+  sed -i 's#http://k3snix-origin.k3snix.svc.cluster.local:9877#http://host.k3d.internal:9877#' \
+    "$tmp/deploy/10-agent-daemonset.yaml"
+  rm "$tmp/deploy/20-origin.yaml"
 fi
+kubectl apply -f "$tmp/deploy/"
 
 if ! kubectl -n k3snix rollout status daemonset/k3snix-agent --timeout=180s; then
   kubectl -n k3snix get pods -o wide || true
@@ -366,5 +397,215 @@ if [ -n "$pf_pid" ]; then
   wait "$pf_pid" 2>/dev/null || true
   pf_pid=""
 fi
+
+# --- delta fetch -------------------------------------------------------------
+
+echo "== delta fetch: peers first, origin second, verified before visible"
+
+manifest_bytes() { jq '[.paths[].narSize] | add' "$CLOSURES_DIR/manifests/$1.json"; }
+manifest_paths() { jq '.paths | length' "$CLOSURES_DIR/manifests/$1.json"; }
+
+fetch() { # fetch POD LABEL — prints the /v1/fetch reply
+  probe "$1" http://127.0.0.1:9860/v1/fetch "{\"label\":\"$2\"}"
+}
+
+# assert_fetched POD LABEL — every path of LABEL is in POD's store and the
+# NAR it serves for each matches the manifest narHash.
+assert_fetched() {
+  local pod="$1" label="$2" resp p want h got ip
+  resp=$(probe "$pod" http://127.0.0.1:9860/v1/missing_bytes "{\"label\":\"$label\"}")
+  [ "$(jq -r '.bytes' <<<"$resp")" = "0" ] || fail "$pod still misses $label after fetch: $resp"
+  ip=$(kubectl -n k3snix get pod "$pod" -o jsonpath='{.status.podIP}')
+  while IFS=$'\t' read -r p want; do
+    h=$(basename "$p" | cut -c1-32)
+    probe "$pod" "http://$ip:9860/nar/$h.nar" >"$tmp/fetched.nar" || fail "$pod does not serve $p"
+    got="sha256:$(nixbase32 "$(sha256sum "$tmp/fetched.nar" | cut -d' ' -f1)")"
+    [ "$got" = "$want" ] || fail "$pod: $p dumps to $got, manifest narHash $want"
+  done < <(jq -r '.paths[] | [.path, .narHash] | @tsv' "$CLOSURES_DIR/manifests/$label.json")
+}
+
+v1_bytes=$(manifest_bytes churn-v1)
+
+# 1. The cold agent holds nothing of churn-v1, and neither do its peers.
+origin0=$(metric "$cold_pod" k3snix_origin_bytes)
+resp=$(fetch "$cold_pod" churn-v1) || fail "cold fetch of churn-v1"
+[ "$(jq -r '.predicted_bytes' <<<"$resp")" = "$v1_bytes" ] || fail "cold predicted bytes: $resp"
+[ "$(jq -r '.origin_bytes' <<<"$resp")" = "$v1_bytes" ] || fail "cold fetch did not come from the origin: $resp"
+[ "$(jq -r '.peer_bytes' <<<"$resp")" = "0" ] || fail "cold fetch used a peer: $resp"
+[ $(($(metric "$cold_pod" k3snix_origin_bytes) - origin0)) = "$v1_bytes" ] ||
+  fail "k3snix_origin_bytes on cold did not grow by $v1_bytes"
+assert_fetched "$cold_pod" churn-v1
+echo "  cold: churn-v1 $v1_bytes bytes from the origin, every NAR matches its narHash"
+
+# 2. The mid agent gets the same closure from the cold agent.
+origin0=$(metric "$mid_pod" k3snix_origin_bytes)
+resp=$(fetch "$mid_pod" churn-v1) || fail "mid fetch of churn-v1"
+[ "$(jq -r '.peer_bytes' <<<"$resp")" = "$v1_bytes" ] || fail "mid fetch did not come from the peer: $resp"
+[ "$(jq -r '.origin_bytes' <<<"$resp")" = "0" ] || fail "mid fetch used the origin: $resp"
+[ "$(metric "$mid_pod" k3snix_origin_bytes)" = "$origin0" ] || fail "mid origin counter moved"
+assert_fetched "$mid_pod" churn-v1
+echo "  mid: churn-v1 $v1_bytes bytes from peer $(jq -r '.fetched[0].source' <<<"$resp" | cut -d' ' -f2), 0 from the origin"
+
+# 3. Upgrading mid to churn-v2 moves only the delta.
+resp=$(fetch "$mid_pod" churn-v2) || fail "mid fetch of churn-v2"
+predicted=$(jq -r '.predicted_bytes' <<<"$resp")
+fetched=$(jq -r '.fetched_bytes' <<<"$resp")
+v2_bytes=$(manifest_bytes churn-v2)
+[ "$predicted" = "$fetched" ] || fail "churn-v2 predicted $predicted, fetched $fetched"
+[ "$fetched" -lt "$v2_bytes" ] || fail "churn-v2 fetched the whole closure ($fetched of $v2_bytes)"
+[ "$(jq -r '.local_hits' <<<"$resp")" -gt 0 ] || fail "churn-v2 had no local hits: $resp"
+assert_fetched "$mid_pod" churn-v2
+echo "  mid: churn-v2 upgrade fetched $fetched of $v2_bytes bytes (predicted $predicted), $(jq -r '.local_hits' <<<"$resp") paths local"
+
+# 4. Two concurrent fetches of one closure download every path once.
+a_bytes=$(manifest_bytes share-a)
+origin0=$(metric "$warm_pod" k3snix_origin_bytes)
+fetch "$warm_pod" share-a >"$tmp/fetch-a1.json" &
+f1=$!
+fetch "$warm_pod" share-a >"$tmp/fetch-a2.json" &
+f2=$!
+wait "$f1" || fail "first concurrent fetch of share-a"
+wait "$f2" || fail "second concurrent fetch of share-a"
+together=$(( $(jq -r '.fetched_bytes' "$tmp/fetch-a1.json") + $(jq -r '.fetched_bytes' "$tmp/fetch-a2.json") ))
+[ "$together" = "$a_bytes" ] || fail "concurrent fetches downloaded $together bytes together, closure is $a_bytes"
+[ $(($(metric "$warm_pod" k3snix_origin_bytes) - origin0)) = "$a_bytes" ] ||
+  fail "warm origin bytes grew by $(($(metric "$warm_pod" k3snix_origin_bytes) - origin0)), want $a_bytes"
+assert_fetched "$warm_pod" share-a
+echo "  warm: two concurrent share-a fetches moved $together bytes for a $a_bytes-byte closure"
+for pod in "$cold_pod" "$mid_pod" "$warm_pod"; do
+  [ "$(metric "$pod" k3snix_fetch_verify_failures)" = "0" ] || fail "$pod rejected a NAR"
+done
+
+# --- cache-aware scheduling ---------------------------------------------------
+
+echo "== k3snix scheduler places a pod by missing bytes"
+for d in k3snix-extender k3snix-scheduler; do
+  if ! kubectl -n k3snix rollout status "deployment/$d" --timeout=180s; then
+    kubectl -n k3snix get pods -o wide || true
+    kubectl -n k3snix logs "deployment/$d" --all-containers --tail=50 || true
+    fail "deployment/$d did not become ready"
+  fi
+done
+
+fixture_root=$(jq -r '.root' "$FIXTURE")
+warm_node=$(kubectl -n k3snix get pod "$warm_pod" -o jsonpath='{.spec.nodeName}')
+
+# k3snix_pod NAME — a long-running pod for the k3snix scheduler that names
+# the fixture closure by its root path. The agent image has no shell, so the
+# agent itself (on its own image's store) keeps the container alive.
+k3snix_pod() {
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $1
+  namespace: default
+  annotations:
+    k3snix.io/root: $fixture_root
+spec:
+  schedulerName: k3snix
+  containers:
+    - name: idle
+      image: k3snix:dev
+      imagePullPolicy: Never
+      command: ["/bin/k3snix-agent", "-listen=127.0.0.1:19999", "-store=/nix/store"]
+EOF
+}
+
+# scheduled_node POD — waits until POD is bound and prints its node.
+scheduled_node() {
+  local node=""
+  for _ in $(seq 1 60); do
+    node=$(kubectl get pod "$1" -o jsonpath='{.spec.nodeName}' 2>/dev/null) || true
+    [ -n "$node" ] && break
+    sleep 2
+  done
+  [ -n "$node" ] || { kubectl describe pod "$1" >&2 || true; fail "pod $1 was never scheduled"; }
+  echo "$node"
+}
+
+k3snix_pod k3snix-placed
+placed=$(scheduled_node k3snix-placed)
+trace=$(kubectl -n k3snix logs deployment/k3snix-extender | grep -F '"pod":"default/k3snix-placed"' | tail -n 1 | sed 's/.*prioritize //')
+[ -n "$trace" ] || fail "no extender trace for default/k3snix-placed"
+echo "  extender trace: $trace"
+[ "$placed" = "$warm_node" ] || fail "k3snix-placed bound to $placed, want the warm node $warm_node"
+warm_score=$(jq -r --arg n "$warm_node" '.nodes[] | select(.node == $n) | .score' <<<"$trace")
+[ "$warm_score" = "10" ] || fail "warm node $warm_node scored $warm_score, want 10"
+[ "$(jq '[.nodes[] | select(.score == 10)] | length' <<<"$trace")" = "1" ] ||
+  fail "more than one node scored 10: $trace"
+echo "  k3snix-placed -> $placed (warm, score 10; the other nodes miss bytes)"
+
+# With the extender gone, the k3snix profile must still schedule pods with
+# its default plugins (ignorable: true).
+kubectl -n k3snix scale deployment/k3snix-extender --replicas=0
+kubectl -n k3snix wait --for=delete pod -l app=k3snix-extender --timeout=60s
+k3snix_pod k3snix-fallback
+echo "  extender down: k3snix-fallback -> $(scheduled_node k3snix-fallback) (default scoring)"
+kubectl delete pod k3snix-placed k3snix-fallback --wait=false >/dev/null
+kubectl -n k3snix scale deployment/k3snix-extender --replicas=1
+
+# --- host-store runtime -----------------------------------------------------
+
+echo "== host-store pods: placed by k3snix, fetched by an init container, run read-only"
+kubectl -n k3snix rollout status deployment/k3snix-extender --timeout=120s
+
+# hoststore_pod NAME LABEL ARGV-JSON — the example workload for LABEL's root.
+hoststore_pod() {
+  local root
+  root=$(jq -r '.root' "$CLOSURES_DIR/manifests/$2.json")
+  sed -e "s#name: hoststore-app#name: $1#" \
+    -e "s#k3snix.io/root: ROOT#k3snix.io/root: $root#" \
+    -e "s#command: \[\"\$(ROOT)/bin/hello\"\]#command: $3#" \
+    deploy/examples/hello-hoststore.yaml | kubectl apply -f -
+}
+
+# 1. hello: the warm node fetched share-a above, so it scores 10 there and
+#    the init container finds every path local.
+hoststore_pod hello share-a '["$(ROOT)/bin/hello"]'
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/hello --timeout=180s ||
+  { kubectl describe pod hello >&2; fail "pod hello did not succeed"; }
+[ "$(kubectl get pod hello -o jsonpath='{.spec.nodeName}')" = "$warm_node" ] || fail "hello not on the warm node"
+out=$(kubectl logs hello -c app)
+[ "$out" = "Hello, world!" ] || fail "hello printed '$out'"
+init=$(kubectl logs hello -c k3snix-fetch)
+[ "$(jq -r '.fetched_bytes' <<<"$init")" = "0" ] || fail "hello fetched bytes on a warm node: $init"
+echo "  hello on $warm_node: '$out', init fetch moved 0 bytes ($(jq -r '.local_hits' <<<"$init") paths local)"
+
+# 2. coreutils: the warm node holds most of it through hello's libraries.
+want_missing=$(probe "$warm_pod" http://127.0.0.1:9860/v1/missing_bytes '{"label":"share-b"}' | jq -r '.bytes')
+hoststore_pod tools share-b '["$(ROOT)/bin/sleep", "3600"]'
+kubectl wait --for=condition=Ready pod/tools --timeout=180s ||
+  { kubectl describe pod tools >&2; fail "pod tools did not become ready"; }
+[ "$(kubectl get pod tools -o jsonpath='{.spec.nodeName}')" = "$warm_node" ] || fail "tools not on the warm node"
+init=$(kubectl logs tools -c k3snix-fetch)
+[ "$(jq -r '.predicted_bytes' <<<"$init")" = "$want_missing" ] || fail "tools predicted bytes: $init, missing_bytes said $want_missing"
+[ "$(jq -r '.fetched_bytes' <<<"$init")" = "$want_missing" ] || fail "tools fetched more than the missing bytes: $init"
+echo "  tools on $warm_node: fetched $want_missing of $(manifest_bytes share-b) bytes, the rest shared with hello"
+
+tools_root=$(jq -r '.root' "$CLOSURES_DIR/manifests/share-b.json")
+if kubectl exec tools -c app -- "$tools_root/bin/touch" /nix/store/k3snix-write-test 2>"$tmp/touch.err"; then
+  fail "a pod wrote into the host store"
+fi
+grep -q 'Read-only file system' "$tmp/touch.err" || fail "touch failed for another reason: $(cat "$tmp/touch.err")"
+echo "  writes to /nix/store from the pod fail: $(cat "$tmp/touch.err")"
+
+# 3. GC roots: deleting hello drops its root; collecting then keeps every
+#    path tools needs, the libraries hello shared with it included.
+[ "$(metric "$warm_pod" k3snix_gc_roots)" = "2" ] || fail "warm agent holds $(metric "$warm_pod" k3snix_gc_roots) roots, want 2"
+kubectl delete pod hello --wait=true >/dev/null
+for _ in $(seq 1 30); do
+  [ "$(metric "$warm_pod" k3snix_gc_roots)" = "1" ] && break
+  sleep 2
+done
+[ "$(metric "$warm_pod" k3snix_gc_roots)" = "1" ] || fail "hello's root outlived the pod"
+gc=$(probe "$warm_pod" http://127.0.0.1:9860/v1/gc '{}') || fail "gc on the warm agent"
+hello_root=$(jq -r '.root' "$CLOSURES_DIR/manifests/share-a.json")
+jq -e --arg p "$hello_root" '.removed | index($p)' <<<"$gc" >/dev/null || fail "gc kept hello: $gc"
+resp=$(probe "$warm_pod" http://127.0.0.1:9860/v1/missing_bytes '{"label":"share-b"}')
+[ "$(jq -r '.bytes' <<<"$resp")" = "0" ] || fail "gc removed paths tools needs: $resp"
+kubectl exec tools -c app -- "$tools_root/bin/true" || fail "tools broke after gc"
+echo "  gc removed $(jq '.removed | length' <<<"$gc") unrooted paths ($(jq -r '.removed_bytes' <<<"$gc") bytes), hello among them; tools still runs"
+kubectl delete pod tools --wait=false >/dev/null
 
 echo "== e2e smoke passed (fallback=$FALLBACK)"
