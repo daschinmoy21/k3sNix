@@ -252,3 +252,16 @@ func TestScore(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentURLBracketsIPv6(t *testing.T) {
+	s := New(nil)
+	for _, tc := range []struct{ ip, want string }{
+		{"10.0.0.7", "http://10.0.0.7:9860"},
+		{"2001:db8::1", "http://[2001:db8::1]:9860"},
+		{"::ffff:10.0.0.7", "http://[::ffff:10.0.0.7]:9860"},
+	} {
+		if got := s.agentURL(candidate{name: "n", ip: tc.ip}); got != tc.want {
+			t.Errorf("agentURL(%s) = %s, want %s", tc.ip, got, tc.want)
+		}
+	}
+}

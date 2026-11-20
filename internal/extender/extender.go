@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -41,9 +42,9 @@ type Server struct {
 	Catalog *closure.Catalog
 
 	// AgentURL maps a node to its agent's base URL. "{ip}" is replaced by
-	// the node's InternalIP and "{node}" by its name. The scheduler sends
-	// full node objects unless nodeCacheCapable is set, so {ip} is
-	// available by default.
+	// the node's InternalIP, bracketed when it is IPv6, and "{node}" by its
+	// name. The scheduler sends full node objects unless nodeCacheCapable is
+	// set, so {ip} is available by default.
 	AgentURL string
 
 	// AgentTimeout bounds one missing_bytes call. A node whose agent does
@@ -292,7 +293,11 @@ func (s *Server) agentURL(n candidate) string {
 		if n.ip == "" {
 			return ""
 		}
-		u = strings.ReplaceAll(u, "{ip}", n.ip)
+		ip := n.ip
+		if net.ParseIP(ip) != nil && strings.Contains(ip, ":") {
+			ip = "[" + ip + "]" // an IPv6 literal needs brackets before :port
+		}
+		u = strings.ReplaceAll(u, "{ip}", ip)
 	}
 	return strings.TrimRight(strings.ReplaceAll(u, "{node}", n.name), "/")
 }
