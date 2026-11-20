@@ -74,6 +74,15 @@
         nixpkgsRev = nixpkgs.rev or "";
       };
 
+      # OCI images of the same workloads, and the store-path versus layer
+      # comparison computed from both (docs/comparison.md).
+      ociImages = import ./nix/images.nix { inherit pkgs; };
+
+      comparison = import ./nix/comparison.nix {
+        inherit pkgs k3snix closures;
+        images = ociImages;
+      };
+
       goTests = pkgs.runCommand "k3snix-go-test" {
         nativeBuildInputs = [ pkgs.go ];
         inherit src;
@@ -97,10 +106,23 @@
           k3snixWrapped
           image
           closures
+          comparison
           ;
+        # Upstream static binary: mount this file alone into Alpine dind nodes.
+        # Keep in step with pkgs.k3s; the live script verifies the versions.
+        k3s-static = pkgs.fetchurl {
+          url = "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/k3s";
+          # Recursive hash because executable=true; upstream file SHA256:
+          # 835873f37245fc615f547a2fe2af9402a347875f13fa64a1f136de644955ea3f
+          hash = "sha256-FqkykQd8H08lobR7tc63XhJHBofnt0jUQhtwUCAMzcg=";
+          executable = true;
+        };
         default = k3snix;
         nix-snapshotter = nix-snapshotter.packages.${system}.nix-snapshotter;
       };
+
+      # The OCI images by granularity and label, e.g. .#ociImages.fine.share-a
+      legacyPackages.${system}.ociImages = ociImages;
 
       apps.${system} = {
         agent = {
@@ -132,6 +154,7 @@
           python3
           nix
           gnused
+          skopeo
         ];
         shellHook = ''
           echo "k3snix dev shell (go $(go version | cut -d' ' -f3))"
@@ -158,6 +181,7 @@
         inherit goTests;
         k3snix = k3snix;
         closures = closures;
+        comparison = comparison;
       };
     };
 }

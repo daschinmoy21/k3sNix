@@ -36,7 +36,8 @@ Phase 2 so far:
   container has the agent fetch the closure and hold a GC root for the pod,
   and the app runs its store path from the node store mounted read-only.
 
-The bench (`cmd/bench`) is still a stub.
+The bench (`cmd/bench`) implements the store-path versus OCI layer byte
+comparison (`docs/comparison.md`).
 
 ## Layout
 
@@ -60,10 +61,16 @@ nix build .#k3snix
 nix run .#agent
 hack/e2e-k3d.sh             # three-node k3d smoke (needs Docker)
 hack/demo-real-closures.sh  # missing bytes and NAR parity on the real closures
+nix build .#comparison      # store paths vs OCI layers on the same workloads
+nix develop -c bash hack/k3s-docker-live.sh # k3snix rule vs real K3s + Docker, fine/coarse
+nix develop -c bash hack/compare-live.sh    # supporting nix copy / docker pull validation
 ```
 
+[docs/comparison.md](docs/comparison.md) describes the k3snix versus normal
+K3s with Docker comparison, its method, live results and limitations.
+
 The dev shell provides Go, k3d, k3s, kubectl, minikube, the Docker client, jq,
-and Python.
+skopeo, and Python.
 
 ## Dependencies
 
