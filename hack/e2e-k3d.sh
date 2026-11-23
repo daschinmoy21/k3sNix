@@ -148,8 +148,14 @@ k3d image import k3snix:dev -c "$CLUSTER"
 k8s_version=$(kubectl version -o json | jq -r '.serverVersion.gitVersion' | sed 's/+.*//')
 scheduler_image="registry.k8s.io/kube-scheduler:$k8s_version"
 echo "== importing $scheduler_image into $CLUSTER"
-docker pull -q "$scheduler_image" >/dev/null
-k3d image import "$scheduler_image" -c "$CLUSTER"
+# The image is multi-arch. With Docker's containerd image store only this
+# platform's layers are local, so a plain save (which k3d image import
+# does) writes an index whose other platforms are missing and the nodes'
+# ctr import fails. Saving this platform alone keeps the archive complete.
+docker_platform=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')
+docker pull -q --platform "$docker_platform" "$scheduler_image" >/dev/null
+docker save --platform "$docker_platform" -o "$tmp/kube-scheduler.tar" "$scheduler_image"
+k3d image import "$tmp/kube-scheduler.tar" -c "$CLUSTER"
 
 echo "== waiting for 3 Ready nodes"
 ready=0
@@ -362,6 +368,12 @@ if [ "$FALLBACK" = 0 ]; then
   kubectl -n k3snix port-forward svc/k3snix-origin 19877:9877 >/dev/null 2>&1 &
   pf_pid=$!
   origin_base="http://127.0.0.1:19877"
+  # Wait for the port-forward to listen, so the checks below never see a
+  # refused connection.
+  for _ in $(seq 1 50); do
+    (exec 3<>/dev/tcp/127.0.0.1/19877) 2>/dev/null && break
+    sleep 0.2
+  done
 else
   origin_base="http://127.0.0.1:9877"
 fi
@@ -588,7 +600,8 @@ if kubectl exec tools -c app -- "$tools_root/bin/touch" /nix/store/k3snix-write-
   fail "a pod wrote into the host store"
 fi
 grep -q 'Read-only file system' "$tmp/touch.err" || fail "touch failed for another reason: $(cat "$tmp/touch.err")"
-echo "  writes to /nix/store from the pod fail: $(cat "$tmp/touch.err")"
+# kubectl adds "command terminated with exit code 1"; report only touch's error.
+echo "  writes to /nix/store from the pod fail: $(grep -m1 'Read-only file system' "$tmp/touch.err")"
 
 # 3. GC roots: deleting hello drops its root; collecting then keeps every
 #    path tools needs, the libraries hello shared with it included.
