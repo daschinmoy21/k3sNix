@@ -161,6 +161,10 @@
         '';
       };
 
+      # The node configuration every benchmark cluster shares, one variant
+      # per arm and runtime (nix/node.nix, docs/evaluation.md).
+      nixosModules.node = ./nix/node.nix;
+
       nixosModules.k3s-with-snapshotter =
         { lib, ... }:
         {
@@ -182,6 +186,10 @@
         k3snix = k3snix;
         closures = closures;
         comparison = comparison;
+        nodeVariants = import ./nix/node-variants.nix {
+          inherit pkgs nixpkgs;
+          nodeModule = self.nixosModules.node;
+        };
       };
     };
 }

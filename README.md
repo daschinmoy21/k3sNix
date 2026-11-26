@@ -45,7 +45,7 @@ comparison (`docs/comparison.md`).
 - `cmd/extender` — kube-scheduler extender: scores feasible nodes by missing NAR bytes
 - `cmd/bench` — placement and fetch model, crossover sweeps
 - `internal/` — packages behind the binaries
-- `nix/` — NixOS module and closure builders
+- `nix/` — benchmark node configuration (`node.nix`), snapshotter module and closure builders
 - `deploy/` — Kubernetes manifests
 - `hack/` — development and e2e scripts
 - `testdata/` — fixtures
