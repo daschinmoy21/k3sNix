@@ -71,6 +71,11 @@ reported as a comparison. The #1 spike is time-boxed; if nix-snapshotter does
 not run on K3s within it, the `k3snix-snapshotter` arm is dropped and the
 report says why.
 
+The `k3snix` extender weighs its cache score by node load in the same way as
+LRScheduler's dynamic weight (`h_CPU = 0.6`, `h_STD = 0.16`; see
+[phases.md](./phases.md), box 3), so the utilisation-spread metric compares
+placement rules, not a load-blind rule against a load-aware one.
+
 ## LRScheduler baseline
 
 No source code is published, so it is reimplemented from the paper

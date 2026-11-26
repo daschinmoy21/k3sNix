@@ -31,6 +31,16 @@ const RootAnnotation = "k3snix.io/root"
 // (extenderv1.MaxExtenderPriority).
 const MaxScore = 10
 
+// Defaults for the load-aware, byte-aware score. The load thresholds are
+// LRScheduler's h_CPU and h_STD (docs/evaluation.md); the scale and the
+// loaded factor are starting points to tune from the Week 5 runs.
+const (
+	DefaultScaleBytes   = 256 << 20
+	DefaultHighCPU      = 0.6
+	DefaultHighSpread   = 0.16
+	DefaultLoadedFactor = 0.25
+)
+
 const (
 	defaultAgentTimeout = 500 * time.Millisecond
 	maxRequestBytes     = 32 << 20 // node objects for a large cluster
@@ -51,6 +61,24 @@ type Server struct {
 	// not answer in time scores 0; the cycle never waits longer than this.
 	AgentTimeout time.Duration
 
+	// ScaleBytes makes the score byte-aware: a node scores
+	// MaxScore × (1 − missing ÷ max(closure bytes, ScaleBytes)). For a
+	// closure of ScaleBytes or more that is the share of the closure the
+	// node holds. A smaller closure costs little to fetch anywhere, so every
+	// node scores near MaxScore and the cache stops outweighing the balance
+	// plugins. Zero scores the held share alone.
+	ScaleBytes uint64
+
+	// Load awareness, after LRScheduler's dynamic weight. A node's score is
+	// multiplied by LoadedFactor when its CPU use is at least HighCPU, and
+	// every node's is when the standard deviation of CPU use across the
+	// candidates is at least HighSpread: a hot or unbalanced cluster leaves
+	// placement to the balance plugins. A node whose agent reports no load
+	// (an older agent, or one not yet sampled) counts as unloaded.
+	HighCPU      float64
+	HighSpread   float64
+	LoadedFactor float64
+
 	Client *http.Client
 	Log    *log.Logger
 
@@ -67,6 +95,10 @@ func New(cat *closure.Catalog) *Server {
 		Catalog:      cat,
 		AgentURL:     "http://{ip}:9860",
 		AgentTimeout: defaultAgentTimeout,
+		ScaleBytes:   DefaultScaleBytes,
+		HighCPU:      DefaultHighCPU,
+		HighSpread:   DefaultHighSpread,
+		LoadedFactor: DefaultLoadedFactor,
 		Client:       &http.Client{},
 		Log:          log.New(os.Stderr, "k3snix-extender ", log.LstdFlags),
 	}
@@ -150,11 +182,14 @@ func candidates(args Args) ([]candidate, error) {
 
 // NodeTrace records how one node was scored in a cycle.
 type NodeTrace struct {
-	Node         string `json:"node"`
-	MissingBytes uint64 `json:"missing_bytes"`
-	TotalBytes   uint64 `json:"total_bytes"`
-	Score        int64  `json:"score"`
-	Error        string `json:"error,omitempty"`
+	Node         string   `json:"node"`
+	MissingBytes uint64   `json:"missing_bytes"`
+	TotalBytes   uint64   `json:"total_bytes"`
+	CPUUtil      *float64 `json:"cpu_util,omitempty"`
+	MemoryUtil   *float64 `json:"mem_util,omitempty"`
+	LoadFactor   float64  `json:"load_factor"`
+	Score        int64    `json:"score"`
+	Error        string   `json:"error,omitempty"`
 }
 
 // Trace is the line logged for every prioritize call.
@@ -164,6 +199,7 @@ type Trace struct {
 	Closure   string      `json:"closure,omitempty"`
 	Label     string      `json:"label,omitempty"`
 	Skipped   string      `json:"skipped,omitempty"`
+	CPUSpread float64     `json:"cpu_spread"` // std dev of CPU use over the nodes that reported it
 	LatencyMS float64     `json:"latency_ms"`
 	Nodes     []NodeTrace `json:"nodes"`
 }
@@ -205,7 +241,7 @@ func (s *Server) handlePrioritize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if tr.Skipped == "" {
-		s.scoreAll(r.Context(), c, tr.Closure, nodes, tr.Nodes)
+		tr.CPUSpread = s.scoreAll(r.Context(), c, tr.Closure, nodes, tr.Nodes)
 	}
 
 	out := make([]HostPriority, len(tr.Nodes))
@@ -230,8 +266,9 @@ func (s *Server) handlePrioritize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// scoreAll asks every node's agent in parallel and fills in traces.
-func (s *Server) scoreAll(ctx context.Context, c closure.Closure, id string, nodes []candidate, traces []NodeTrace) {
+// scoreAll asks every node's agent in parallel, fills in traces, and
+// returns the spread of CPU use across the nodes that reported it.
+func (s *Server) scoreAll(ctx context.Context, c closure.Closure, id string, nodes []candidate, traces []NodeTrace) float64 {
 	timeout := s.AgentTimeout
 	if timeout <= 0 {
 		timeout = defaultAgentTimeout
@@ -250,25 +287,68 @@ func (s *Server) scoreAll(ctx context.Context, c closure.Closure, id string, nod
 				return
 			}
 			t.MissingBytes, t.TotalBytes = m.Bytes, m.TotalBytes
-			t.Score = Score(m.Bytes, m.TotalBytes)
+			t.CPUUtil, t.MemoryUtil = m.CPUUtil, m.MemoryUtil
 		}()
 	}
 	wg.Wait()
+
+	var cpus []float64
+	for _, t := range traces {
+		if t.Error == "" && t.CPUUtil != nil {
+			cpus = append(cpus, *t.CPUUtil)
+		}
+	}
+	spread := stddev(cpus)
+	for i := range traces {
+		t := &traces[i]
+		if t.Error != "" {
+			continue
+		}
+		t.LoadFactor = 1
+		if spread >= s.HighSpread || (t.CPUUtil != nil && *t.CPUUtil >= s.HighCPU) {
+			t.LoadFactor = s.LoadedFactor
+		}
+		t.Score = Score(t.MissingBytes, t.TotalBytes, s.ScaleBytes, t.LoadFactor)
+	}
+	return spread
 }
 
-// Score maps missing bytes to 0..MaxScore: the share of the closure's bytes
-// the node already holds, rounded. An empty closure scores 0.
-func Score(missing, total uint64) int64 {
+// Score maps a node's missing bytes to 0..MaxScore:
+// MaxScore × (1 − missing ÷ max(total, scale)) × loadFactor, rounded. With a
+// scale of 0, or a closure of at least scale bytes, the base is the share of
+// the closure the node holds. An empty closure scores 0.
+func Score(missing, total, scale uint64, loadFactor float64) int64 {
 	if total == 0 || missing > total {
 		return 0
 	}
-	return int64(math.Round(MaxScore * float64(total-missing) / float64(total)))
+	denom := max(total, scale)
+	base := MaxScore * (1 - float64(missing)/float64(denom))
+	return int64(math.Round(base * loadFactor))
+}
+
+// stddev is the population standard deviation; 0 for fewer than two values.
+func stddev(xs []float64) float64 {
+	if len(xs) < 2 {
+		return 0
+	}
+	var mean float64
+	for _, x := range xs {
+		mean += x
+	}
+	mean /= float64(len(xs))
+	var v float64
+	for _, x := range xs {
+		v += (x - mean) * (x - mean)
+	}
+	return math.Sqrt(v / float64(len(xs)))
 }
 
 // missingReply is the subset of the agent's /v1/missing_bytes reply used.
 type missingReply struct {
-	Bytes      uint64 `json:"bytes"`
-	TotalBytes uint64 `json:"total_bytes"`
+	Bytes      uint64   `json:"bytes"`
+	TotalBytes uint64   `json:"total_bytes"`
+	CPUUtil    *float64 `json:"cpu_util"`
+	MemoryUtil *float64 `json:"mem_util"`
 }
 
 var errUnknownClosure = errors.New("agent does not know the closure")

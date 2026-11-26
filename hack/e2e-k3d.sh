@@ -47,7 +47,13 @@
 # Scheduler: a second kube-scheduler (profile k3snix) calls the extender,
 # whose catalog holds the fixture and the pinned manifests. A pod naming the
 # fixture root must bind to the warm node, the extender's trace must explain
-# why, and with the extender gone a k3snix pod must still be scheduled.
+# why, and with the extender gone a k3snix pod must still be scheduled. The
+# fixture is 150 bytes, so these checks pin the extender to held-share
+# scoring (-scale-bytes=0). Then replicas of one pod show the hot spot: under
+# held share they all bind to the warm node, and under the default
+# byte-aware scale the small closure no longer outweighs the spreading
+# plugins. The k3d nodes share one kernel, so the agents report no load
+# (-load-interval=0); load-aware scoring is covered by unit tests.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -186,6 +192,8 @@ kubectl -n k3snix create configmap k3snix-scheduler-catalog \
 mkdir "$tmp/deploy"
 cp deploy/*.yaml "$tmp/deploy/"
 sed -i "s#registry.k8s.io/kube-scheduler:v[0-9.]*#$scheduler_image#" "$tmp/deploy/31-scheduler.yaml"
+sed -i 's#^\( *\)- -agent-timeout=500ms$#&\n\1- -scale-bytes=0#' "$tmp/deploy/30-extender.yaml"
+grep -q -- '- -scale-bytes=0' "$tmp/deploy/30-extender.yaml" || fail "could not pin the extender to held-share scoring"
 if [ "$FALLBACK" = 1 ]; then
   sed -i 's#http://k3snix-origin.k3snix.svc.cluster.local:9877#http://host.k3d.internal:9877#' \
     "$tmp/deploy/10-agent-daemonset.yaml"
@@ -556,6 +564,100 @@ k3snix_pod k3snix-fallback
 echo "  extender down: k3snix-fallback -> $(scheduled_node k3snix-fallback) (default scoring)"
 kubectl delete pod k3snix-placed k3snix-fallback --wait=false >/dev/null
 kubectl -n k3snix scale deployment/k3snix-extender --replicas=1
+
+# --- hot spot ---------------------------------------------------------------
+
+echo "== replicas: held share piles them on the warm node, byte-aware scoring spreads them"
+
+# extender_trace POD — the extender's last trace line for default/POD, if any.
+extender_trace() {
+  kubectl -n k3snix logs -l app=k3snix-extender --tail=-1 2>/dev/null |
+    grep -F "\"pod\":\"default/$1\"" | tail -n 1 | sed 's/.*prioritize //' || true
+}
+
+# extender_live — waits until the k3snix scheduler reaches the extender. A
+# ready extender pod is not enough: until the Service routes to it, the
+# scheduler skips the ignorable extender and scores by default plugins.
+extender_live() {
+  local i
+  kubectl -n k3snix rollout status deployment/k3snix-extender --timeout=120s >/dev/null
+  for i in $(seq 1 30); do
+    k3snix_pod "k3snix-canary-$i" >/dev/null
+    scheduled_node "k3snix-canary-$i" >/dev/null
+    local traced
+    traced=$(extender_trace "k3snix-canary-$i")
+    kubectl delete pod "k3snix-canary-$i" --wait=true >/dev/null
+    [ -n "$traced" ] && return 0
+    sleep 2
+  done
+  fail "the k3snix scheduler never reached the extender"
+}
+
+# extender_args JQ-FILTER — rewrites the extender's args and waits until the
+# scheduler uses the new extender.
+extender_args() {
+  kubectl -n k3snix get deployment k3snix-extender -o json |
+    jq "(.spec.template.spec.containers[0].args) |= ($1)" | kubectl replace -f - >/dev/null
+  extender_live
+}
+
+# replica_nodes N — runs N replicas of a k3snix pod naming the fixture root
+# and prints the node of each, one per line.
+replica_nodes() {
+  kubectl apply -f - >/dev/null <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k3snix-replicas
+  namespace: default
+spec:
+  replicas: $1
+  selector:
+    matchLabels:
+      app: k3snix-replicas
+  template:
+    metadata:
+      labels:
+        app: k3snix-replicas
+      annotations:
+        k3snix.io/root: $fixture_root
+    spec:
+      schedulerName: k3snix
+      containers:
+        - name: idle
+          image: k3snix:dev
+          imagePullPolicy: Never
+          command: ["/bin/k3snix-agent", "-listen=127.0.0.1:19999", "-store=/nix/store", "-load-interval=0"]
+EOF
+  kubectl rollout status deployment/k3snix-replicas --timeout=120s >/dev/null ||
+    fail "k3snix-replicas did not become ready"
+  kubectl get pods -l app=k3snix-replicas -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}'
+  kubectl delete deployment k3snix-replicas --cascade=foreground --wait=true >/dev/null
+}
+
+replicas=6
+extender_live
+held=$(replica_nodes "$replicas")
+[ "$(grep -cx "$warm_node" <<<"$held")" = "$replicas" ] ||
+  fail "under held-share scoring the replicas did not all bind to $warm_node: $(sort <<<"$held" | uniq -c | xargs)"
+echo "  held share (-scale-bytes=0): all $replicas replicas on $warm_node"
+
+extender_args 'map(select(. != "-scale-bytes=0"))'
+spread=$(replica_nodes "$replicas")
+on_warm=$(grep -cx "$warm_node" <<<"$spread" || true)
+nodes=$(sort -u <<<"$spread" | wc -l)
+[ "$nodes" -ge 2 ] && [ "$on_warm" -lt "$replicas" ] ||
+  fail "byte-aware scoring did not spread the replicas: $(sort <<<"$spread" | uniq -c | xargs)"
+# The spread came from the extender's byte-aware scores, not from default
+# scoring: the 150-byte fixture scores the cold node 10 as well.
+trace=$(kubectl -n k3snix logs -l app=k3snix-extender --tail=-1 |
+  grep -F '"pod":"default/k3snix-replicas-' | tail -n 1 | sed 's/.*prioritize //')
+[ -n "$trace" ] || fail "no extender trace for the replicas"
+cold_node=$(kubectl -n k3snix get pod "$cold_pod" -o jsonpath='{.spec.nodeName}')
+[ "$(jq -r --arg n "$cold_node" '.nodes[] | select(.node == $n) | .score' <<<"$trace")" = "10" ] ||
+  fail "byte-aware trace does not score the cold node 10: $trace"
+echo "  byte-aware (default scale): $replicas replicas over $nodes nodes, $on_warm on $warm_node"
+extender_args '. + ["-scale-bytes=0"]'
 
 # --- host-store runtime -----------------------------------------------------
 

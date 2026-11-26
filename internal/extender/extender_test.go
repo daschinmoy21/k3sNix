@@ -38,6 +38,13 @@ func catalogDir(t *testing.T) string {
 // agent started without a catalog only answers path-list queries.
 func startAgent(t *testing.T, catalog string, have ...string) string {
 	t.Helper()
+	return startLoadedAgent(t, catalog, nil, have...)
+}
+
+// startLoadedAgent is startAgent for a node reporting load; nil reports none,
+// like an agent from before load reporting.
+func startLoadedAgent(t *testing.T, catalog string, load *agent.NodeLoad, have ...string) string {
+	t.Helper()
 	store := t.TempDir()
 	for _, name := range have {
 		if err := os.Mkdir(filepath.Join(store, name), 0o755); err != nil {
@@ -47,6 +54,9 @@ func startAgent(t *testing.T, catalog string, have ...string) string {
 	a := agent.New(store)
 	a.Store.TTL = 0
 	a.Log = log.New(io.Discard, "", 0)
+	if load != nil {
+		a.SetLoad(*load)
+	}
 	if catalog != "" {
 		if err := a.LoadCatalog(catalog); err != nil {
 			t.Fatal(err)
@@ -65,6 +75,9 @@ func newExtender(t *testing.T, catalog string) (*Server, *bytes.Buffer) {
 	}
 	s := New(cat)
 	s.AgentURL = "http://{node}"
+	// The fixture closure is 1000 bytes: score by held share unless a test
+	// is about the byte-aware scale.
+	s.ScaleBytes = 0
 	var logs bytes.Buffer
 	s.Log = log.New(&logs, "", 0)
 	return s, &logs
@@ -236,20 +249,111 @@ func TestFilterPassesNodesThrough(t *testing.T) {
 }
 
 func TestScore(t *testing.T) {
+	const mb = 1 << 20
 	for _, tc := range []struct {
-		missing, total uint64
-		want           int64
+		missing, total, scale uint64
+		factor                float64
+		want                  int64
 	}{
-		{0, 1000, 10},
-		{1000, 1000, 0},
-		{24, 1000, 10}, // a 2.4% upgrade delta still scores the warm node 10
-		{500, 1000, 5},
-		{0, 0, 0},
-		{5, 1, 0},
+		// Held share: no scale, or a closure at least as big as the scale.
+		{0, 1000, 0, 1, 10},
+		{1000, 1000, 0, 1, 0},
+		{24, 1000, 0, 1, 10}, // a 2.4% upgrade delta still scores the warm node 10
+		{500, 1000, 0, 1, 5},
+		{1024 * mb, 2048 * mb, 256 * mb, 1, 5},
+		// Byte-aware: a cold node missing all of a 5 MB closure costs little.
+		{5 * mb, 5 * mb, 256 * mb, 1, 10},
+		{128 * mb, 128 * mb, 256 * mb, 1, 5},
+		// Load factor.
+		{0, 1000, 0, 0.25, 3},
+		{0, 0, 0, 1, 0},
+		{5, 1, 0, 1, 0},
 	} {
-		if got := Score(tc.missing, tc.total); got != tc.want {
-			t.Errorf("Score(%d, %d) = %d, want %d", tc.missing, tc.total, got, tc.want)
+		if got := Score(tc.missing, tc.total, tc.scale, tc.factor); got != tc.want {
+			t.Errorf("Score(%d, %d, %d, %v) = %d, want %d", tc.missing, tc.total, tc.scale, tc.factor, got, tc.want)
 		}
+	}
+}
+
+func fixturePaths() []string {
+	return []string{
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-web", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-lib", "cccccccccccccccccccccccccccccccc-libc",
+	}
+}
+
+// A fully cached but loaded node loses to a cold idle node when the closure
+// is small: fetching it costs little, and the warm node is busy.
+func TestLoadedWarmNodeLosesOnSmallClosure(t *testing.T) {
+	cat := catalogDir(t)
+	warm := startLoadedAgent(t, cat, &agent.NodeLoad{CPU: 0.9, Memory: 0.5}, fixturePaths()...)
+	cold := startLoadedAgent(t, cat, &agent.NodeLoad{CPU: 0.1, Memory: 0.2})
+	s, logs := newExtender(t, cat)
+	s.ScaleBytes = 1 << 20 // the 1000-byte closure is small
+	s.HighSpread = 1       // isolate the per-node CPU threshold
+	names := []string{warm, cold}
+	got := prioritize(t, s, Args{Pod: podJSON(map[string]string{RootAnnotation: root}), NodeNames: &names})
+	if got[cold] <= got[warm] {
+		t.Fatalf("scores %v: the cold idle node should beat the loaded warm node", got)
+	}
+
+	// The trace records each node's load and factor.
+	var tr Trace
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(logs.String()), "prioritize ")), &tr); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range tr.Nodes {
+		if n.CPUUtil == nil || n.MemoryUtil == nil {
+			t.Errorf("trace for %s lacks load: %+v", n.Node, n)
+		}
+		if want := map[string]float64{warm: 0.25, cold: 1}[n.Node]; n.LoadFactor != want {
+			t.Errorf("node %s load factor %v, want %v", n.Node, n.LoadFactor, want)
+		}
+	}
+}
+
+// A large closure still wins on a moderately loaded node.
+func TestLargeClosureWinsOnModeratelyLoadedNode(t *testing.T) {
+	cat := catalogDir(t)
+	warm := startLoadedAgent(t, cat, &agent.NodeLoad{CPU: 0.5}, fixturePaths()...)
+	cold := startLoadedAgent(t, cat, &agent.NodeLoad{CPU: 0.45})
+	s, _ := newExtender(t, cat)
+	s.ScaleBytes = 1000 // the closure is as large as the scale
+	names := []string{warm, cold}
+	got := prioritize(t, s, Args{Pod: podJSON(map[string]string{RootAnnotation: root}), NodeNames: &names})
+	if got[warm] != 10 || got[cold] != 0 {
+		t.Fatalf("scores %v, want the warm node 10 and the cold node 0", got)
+	}
+}
+
+// An unbalanced cluster scales every node's score down, so the balance
+// plugins decide; a node without load data counts as unloaded.
+func TestUnbalancedClusterScalesEveryScore(t *testing.T) {
+	cat := catalogDir(t)
+	warm := startLoadedAgent(t, cat, &agent.NodeLoad{CPU: 0.1}, fixturePaths()...)
+	busy := startLoadedAgent(t, cat, &agent.NodeLoad{CPU: 0.55}, fixturePaths()...)
+	old := startAgent(t, cat, fixturePaths()...) // reports no load
+	s, logs := newExtender(t, cat)
+	names := []string{warm, busy, old}
+	got := prioritize(t, s, Args{Pod: podJSON(map[string]string{RootAnnotation: root}), NodeNames: &names})
+	// CPU 0.1 and 0.55 spread by 0.225 >= 0.16; the old agent adds no sample.
+	for _, n := range names {
+		if got[n] != 3 {
+			t.Errorf("node %s score %d, want 3 (10 x 0.25)", n, got[n])
+		}
+	}
+	var tr Trace
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(logs.String()), "prioritize ")), &tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.CPUSpread < 0.224 || tr.CPUSpread > 0.226 {
+		t.Fatalf("cpu_spread %v, want 0.225", tr.CPUSpread)
+	}
+
+	// Balanced again: the node without load data is unloaded and scores 10.
+	s.HighSpread = 1
+	got = prioritize(t, s, Args{Pod: podJSON(map[string]string{RootAnnotation: root}), NodeNames: &names})
+	if got[old] != 10 || got[warm] != 10 {
+		t.Fatalf("scores %v, want 10 for the idle node and the node without load", got)
 	}
 }
 
