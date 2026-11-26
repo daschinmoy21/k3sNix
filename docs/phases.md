@@ -62,12 +62,27 @@ Box 3, cache-aware scheduling. Build items:
       the queue, and extender failure leaves default scheduling
 - [x] Score and decision-latency traces logged per scheduling cycle
 - [x] Resource fit stays in the loop so cache attraction does not overload the
-      warm node (anti-heating remains a stretch goal)
+      warm node
+- [x] Anti-heating: the score is byte-aware and load-aware, so replicas of
+      one workload do not pile onto the warm node (#68)
 
-The score is `round(10 × held bytes / closure bytes)`, so a node missing a
-2.4% upgrade delta still scores 10. A pod's closure comes from the catalog by
-its `k3snix.io/root` annotation. The k3d smoke checks the placement against
-the extender's trace and the fallback with the extender scaled to zero.
+A node scores `round(10 × (1 − missing ÷ max(closure, scale)) × load factor)`.
+For a closure of at least `-scale-bytes` (256 MiB by default) the base is the
+held share, so a node missing a 2.4% upgrade delta still scores 10. A smaller
+closure costs little to fetch anywhere, so every node scores near 10 and the
+spreading plugins decide. The load factor follows LRScheduler's dynamic
+weight: it is `-loaded-factor` (0.25) when the node's CPU use is at least
+`-high-cpu` (0.6) or the spread of CPU use across the candidates is at least
+`-high-spread` (0.16), and 1 otherwise. Agents sample CPU and memory use from
+`/proc` and report them in `missing_bytes` replies; a node that reports none
+counts as unloaded. The scale and factor are starting points, to be tuned
+from the Week 5 runs.
+
+A pod's closure comes from the catalog by its `k3snix.io/root` annotation.
+The k3d smoke checks the placement against the extender's trace, the
+fallback with the extender scaled to zero, and that replicas of one pod pile
+onto the warm node under held-share scoring but spread under the default
+scale.
 
 Box 4, delta fetch and lazy mount. Build items:
 

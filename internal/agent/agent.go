@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k3snix/internal/closure"
@@ -91,6 +92,10 @@ type Server struct {
 	// SignKey, when set, adds a nix Sig line to every narinfo.
 	SignKey *SigningKey
 
+	// ProcDir is where RunLoadSampler reads stat and meminfo. Empty means
+	// /proc.
+	ProcDir string
+
 	// Materializer installs fetched NARs; nil disables /v1/fetch.
 	Materializer Materializer
 
@@ -120,6 +125,8 @@ type Server struct {
 	// catalogPaths maps a store basename to its catalog entry, so narinfo
 	// and NAR serving can find references, narHash and narSize for a path.
 	catalogPaths map[string]closure.Path
+
+	load atomic.Pointer[NodeLoad] // last sampled node load; nil before the first sample
 
 	mu                   sync.Mutex
 	dumps                map[string]*dumpCall
@@ -265,6 +272,10 @@ type MissingResp struct {
 	TotalPaths int      `json:"total_paths"`
 	ComputeMS  float64  `json:"compute_ms"` // time spent computing this answer, not a transfer estimate
 	Missing    []string `json:"missing"`
+
+	// The node's load (RunLoadSampler), absent until it has been sampled.
+	CPUUtil    *float64 `json:"cpu_util,omitempty"`
+	MemoryUtil *float64 `json:"mem_util,omitempty"`
 }
 
 func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
@@ -327,6 +338,9 @@ func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
 		TotalPaths: m.TotalPaths,
 		ComputeMS:  float64(time.Since(start).Microseconds()) / 1000,
 		Missing:    m.MissingPaths,
+	}
+	if l := s.currentLoad(); l != nil {
+		resp.CPUUtil, resp.MemoryUtil = &l.CPU, &l.Memory
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

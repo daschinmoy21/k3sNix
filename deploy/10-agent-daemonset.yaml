@@ -44,6 +44,10 @@ spec:
             # once the kubelet has removed the pod.
             - -gcroots-dir=/data/gcroots
             - -kubelet-pods-dir=/host/kubelet-pods
+            # The k3d nodes share one kernel, so /proc shows the same load
+            # on every node: report none, and the extender treats every
+            # node as unloaded.
+            - -load-interval=0
           env:
             - name: NODE_NAME
               valueFrom:
