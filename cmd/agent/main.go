@@ -41,6 +41,7 @@ func main() {
 		peersDNS   = flag.String("peers-dns", "", "DNS name whose addresses, except this node's, are peer caches")
 		peerPort   = flag.Int("peer-port", 9860, "agent port on the -peers-dns addresses")
 		workers    = flag.Int("fetch-workers", 4, "concurrent NAR downloads in one fetch")
+		nixStore   = flag.String("nix-store-dir", "", "the store directory as Nix on the host sees it, when -store is a mount of it elsewhere (default: -store)")
 		rootsDir   = flag.String("gcroots-dir", "", "directory of per-pod GC roots (under /nix/var/nix/gcroots with -materialize=nix)")
 		podsDir    = flag.String("kubelet-pods-dir", "", "the kubelet's pod directory; roots of pods missing from it are removed")
 		reconcile  = flag.Duration("gcroots-interval", 10*time.Second, "how often roots of deleted pods are removed")
@@ -78,12 +79,16 @@ func main() {
 		}
 		log.Printf("catalog loaded from %s", *catalog)
 	}
+	s.NixStoreDir = *nixStore
+	if s.NixStoreDir == "" {
+		s.NixStoreDir = *store
+	}
 	switch *material {
 	case "":
 	case "dir":
 		s.Materializer = agent.DirMaterializer{Dir: *store}
 	case "nix":
-		s.Materializer = agent.NixMaterializer{StoreDir: *store}
+		s.Materializer = agent.NixMaterializer{StoreDir: s.NixStoreDir}
 	default:
 		log.Fatalf("-materialize %q: want dir or nix", *material)
 	}

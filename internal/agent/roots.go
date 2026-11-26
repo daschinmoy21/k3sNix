@@ -27,7 +27,9 @@ import (
 // podUID matches a Kubernetes UID: hex digits and dashes.
 var podUID = regexp.MustCompile(`^[0-9a-f-]{1,64}$`)
 
-// addRoot points RootsDir/uid at the closure's root path, atomically.
+// addRoot points RootsDir/uid at the closure's root path, atomically. The
+// link names the path under the host's store directory, since Nix on the
+// host is what reads the roots.
 func (s *Server) addRoot(uid string, c closure.Closure) error {
 	if s.RootsDir == "" {
 		return errors.New("pod roots are disabled (no -gcroots-dir)")
@@ -41,7 +43,7 @@ func (s *Server) addRoot(uid string, c closure.Closure) error {
 	if err := os.MkdirAll(s.RootsDir, 0o755); err != nil {
 		return err
 	}
-	target := filepath.Join(s.Store.Dir, filepath.Base(c.Root))
+	target := filepath.Join(s.nixStoreDir(), filepath.Base(c.Root))
 	tmp := filepath.Join(s.RootsDir, ".tmp-"+uid)
 	os.Remove(tmp)
 	if err := os.Symlink(target, tmp); err != nil {
