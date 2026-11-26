@@ -70,6 +70,32 @@
         };
       };
 
+      # The agent for Nix nodes (-materialize=nix): it ships nix, which
+      # imports fetched paths through the host's nix-daemon socket. The host
+      # store is mounted elsewhere (-store=/host/nix/store), so this image's
+      # own /nix/store, holding nix itself, stays visible.
+      imageNix = pkgs.dockerTools.buildLayeredImage {
+        name = "k3snix";
+        tag = "nix";
+        contents = [
+          k3snixWrapped
+          pkgs.nix
+          pkgs.bashInteractive
+          pkgs.coreutils
+        ];
+        extraCommands = ''
+          mkdir -m 1777 tmp
+        '';
+        config = {
+          Entrypoint = [ "/bin/k3snix-agent" ];
+          Env = [
+            "NIX_REMOTE=daemon"
+            "HOME=/tmp"
+            "PATH=/bin"
+          ];
+        };
+      };
+
       closures = pkgs.callPackage ./nix/closures.nix {
         nixpkgsRev = nixpkgs.rev or "";
       };
@@ -105,6 +131,7 @@
           k3snix
           k3snixWrapped
           image
+          imageNix
           closures
           comparison
           ;
@@ -121,8 +148,16 @@
         nix-snapshotter = nix-snapshotter.packages.${system}.nix-snapshotter;
       };
 
-      # The OCI images by granularity and label, e.g. .#ociImages.fine.share-a
-      legacyPackages.${system}.ociImages = ociImages;
+      legacyPackages.${system} = {
+        # The OCI images by granularity and label, e.g. .#ociImages.fine.share-a
+        inherit ociImages;
+
+        # NixOS VM tests. They need KVM, so they stay out of
+        # `nix flake check` and CI: nix build .#tests.agent-nix -L
+        tests.agent-nix = import ./nix/tests/agent-nix.nix {
+          inherit pkgs k3snix imageNix closures;
+        };
+      };
 
       apps.${system} = {
         agent = {

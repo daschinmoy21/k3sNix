@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"k3snix/internal/closure"
 	"k3snix/internal/nar"
 	"k3snix/internal/nixbase32"
 )
@@ -355,5 +356,56 @@ func TestOriginNARProbeSizeCap(t *testing.T) {
 	}
 	if n := narHits.Load(); n != 0 {
 		t.Fatalf("NAR fetched %d times despite exceeding the cap", n)
+	}
+}
+
+// An agent pod sees the host store at its mount path, but everything Nix on
+// the host reads must name /nix/store: the narinfo and its signature, the
+// cache's StoreDir, and the GC roots.
+func TestNixStoreDirNamesHostPaths(t *testing.T) {
+	dir, catDir := catalogStore(t) // the mount, e.g. /host/nix/store
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ParseSigningKey("k3snix-test-1:" + base64.StdEncoding.EncodeToString(priv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newServer(t, dir)
+	if err := s.LoadCatalog(catDir); err != nil {
+		t.Fatal(err)
+	}
+	s.SignKey = key
+	s.NixStoreDir = "/nix/store"
+	s.RootsDir = t.TempDir()
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	if _, body := get(t, srv.URL+"/nix-cache-info"); !strings.Contains(string(body), "StoreDir: /nix/store\n") {
+		t.Fatalf("nix-cache-info %q, want StoreDir /nix/store", body)
+	}
+	_, info := get(t, srv.URL+"/"+catHash+".narinfo")
+	fields := parseNarinfo(t, info)
+	if want := "/nix/store/" + catName; fields["StorePath"] != want {
+		t.Fatalf("StorePath %q, want %q", fields["StorePath"], want)
+	}
+	_, b64, _ := strings.Cut(fields["Sig"], ":")
+	sig, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := fmt.Sprintf("1;%s;%s;%s;/nix/store/%s,/nix/store/%s", fields["StorePath"], fields["NarHash"],
+		fields["NarSize"], catName, depName)
+	if !ed25519.Verify(pub, []byte(msg), sig) {
+		t.Fatalf("signature does not verify over %q", msg)
+	}
+
+	const uid = "0f0e0d0c-0000-4000-8000-000000000001"
+	if err := s.addRoot(uid, closure.Closure{Root: filepath.Join(dir, catName)}); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(s.RootsDir, uid)); err != nil || target != "/nix/store/"+catName {
+		t.Fatalf("GC root -> %q (%v), want /nix/store/%s", target, err, catName)
 	}
 }

@@ -91,6 +91,13 @@ type Server struct {
 	// SignKey, when set, adds a nix Sig line to every narinfo.
 	SignKey *SigningKey
 
+	// NixStoreDir is the store directory as Nix on the host sees it, when
+	// the agent sees it elsewhere: an agent pod on a Nix node mounts the
+	// host /nix/store at another path (-store=/host/nix/store) so that it
+	// does not hide the image's own store. Narinfo, GC roots and imports
+	// name paths under NixStoreDir. Empty means Store.Dir.
+	NixStoreDir string
+
 	// Materializer installs fetched NARs; nil disables /v1/fetch.
 	Materializer Materializer
 
@@ -334,7 +341,15 @@ func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCacheInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/x-nix-cache-info")
-	fmt.Fprintf(w, "StoreDir: %s\nWantMassQuery: 1\nPriority: 30\n", s.Store.Dir)
+	fmt.Fprintf(w, "StoreDir: %s\nWantMassQuery: 1\nPriority: 30\n", s.nixStoreDir())
+}
+
+// nixStoreDir is the store directory Nix on the host uses; see NixStoreDir.
+func (s *Server) nixStoreDir() string {
+	if s.NixStoreDir != "" {
+		return s.NixStoreDir
+	}
+	return s.Store.Dir
 }
 
 func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
@@ -396,7 +411,8 @@ func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash strin
 	}
 	refs := s.references(path)
 	w.Header().Set("Content-Type", "text/x-nix-narinfo")
-	fmt.Fprintf(w, "StorePath: %s\n", path)
+	storePath := filepath.Join(s.nixStoreDir(), filepath.Base(path))
+	fmt.Fprintf(w, "StorePath: %s\n", storePath)
 	fmt.Fprintf(w, "URL: nar/%s.nar\n", hash)
 	fmt.Fprintf(w, "Compression: none\n")
 	fmt.Fprintf(w, "FileHash: sha256:%s\n", narHash)
@@ -407,9 +423,9 @@ func (s *Server) serveNarinfo(w http.ResponseWriter, r *http.Request, hash strin
 	if s.SignKey != nil {
 		full := make([]string, len(refs))
 		for i, ref := range refs {
-			full[i] = filepath.Join(s.Store.Dir, ref)
+			full[i] = filepath.Join(s.nixStoreDir(), ref)
 		}
-		fmt.Fprintf(w, "Sig: %s\n", s.SignKey.Sign(path, "sha256:"+narHash, narSize, full))
+		fmt.Fprintf(w, "Sig: %s\n", s.SignKey.Sign(storePath, "sha256:"+narHash, narSize, full))
 	}
 }
 

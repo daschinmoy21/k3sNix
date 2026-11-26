@@ -120,8 +120,14 @@ removes the link once the pod's directory leaves `-kubelet-pods-dir`. On a
 `-materialize=dir` store `POST /v1/gc` deletes every catalog path no root
 needs; on a Nix node the roots sit under `/nix/var/nix/gcroots` and
 `nix-collect-garbage` honours them. The k3d smoke covers containerd only; the
-design has nothing runtime-specific, but `--docker` is still unverified, and
-`-materialize=nix` needs an agent image that ships `nix`.
+design has nothing runtime-specific, but `--docker` is still unverified.
+
+On Nix nodes the agent runs from `k3snix:nix` (`.#imageNix`), which ships
+`nix`, with `deploy/nix-node/10-agent-daemonset.yaml`. It mounts the host
+store read-only at `/host/nix/store` (`-nix-store-dir=/nix/store`) and the
+host nix-daemon socket, so fetched paths are imported with their references
+registered, and pod roots live in `/nix/var/nix/gcroots/k3snix`. The NixOS
+VM test `nix build .#tests.agent-nix` checks this on a real Nix store.
 
 Box 6, benchmark. Build items:
 

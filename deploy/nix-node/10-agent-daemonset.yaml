@@ -1,0 +1,124 @@
+# The agent DaemonSet for nodes with Nix (the benchmark clusters, built from
+# nixosModules.node). Apply it instead of deploy/10-agent-daemonset.yaml,
+# which is for the k3d smoke and keeps its own store volume.
+#
+# Fetched paths go into the host's /nix/store through the host nix-daemon
+# (-materialize=nix), with their references registered, and each pod's GC
+# root sits under /nix/var/nix/gcroots/k3snix, so nix-collect-garbage on
+# the node keeps every path a running pod needs.
+#
+# The host store is mounted at /host/nix/store, not /nix/store, so it does
+# not hide the image's own store, which holds nix. -nix-store-dir tells the
+# agent that the host's Nix calls it /nix/store.
+#
+# Host-store pods on these nodes mount hostPath /nix/store read-only, where
+# deploy/examples/hello-hoststore.yaml mounts the k3d store,
+# /var/lib/k3snix/store.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k3snix-agent
+  namespace: k3snix
+  labels:
+    app: k3snix-agent
+spec:
+  selector:
+    matchLabels:
+      app: k3snix-agent
+  template:
+    metadata:
+      labels:
+        app: k3snix-agent
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: k3snix:nix
+          imagePullPolicy: Never
+          args:
+            - -listen=:9860
+            - -store=/host/nix/store
+            - -nix-store-dir=/nix/store
+            - -catalog=/catalog
+            - -origin=http://k3snix-origin.k3snix.svc.cluster.local:9877
+            - -materialize=nix
+            - -peers-dns=k3snix-agent-peers.k3snix.svc.cluster.local
+            - -peer-port=9860
+            - -gcroots-dir=/host/gcroots
+            - -kubelet-pods-dir=/host/kubelet-pods
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - containerPort: 9860
+              hostPort: 9860
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9860
+          volumeMounts:
+            # Read-only: only the nix-daemon writes the store.
+            - name: nix-store
+              mountPath: /host/nix/store
+              readOnly: true
+            - name: nix-daemon-socket
+              mountPath: /nix/var/nix/daemon-socket
+            - name: gcroots
+              mountPath: /host/gcroots
+            - name: kubelet-pods
+              mountPath: /host/kubelet-pods
+              readOnly: true
+            - name: catalog
+              mountPath: /catalog
+              readOnly: true
+      volumes:
+        - name: nix-store
+          hostPath:
+            path: /nix/store
+            type: Directory
+        # The agent runs as root, which the nix-daemon trusts by default:
+        # the staged narinfo nix copy imports carries no signature.
+        - name: nix-daemon-socket
+          hostPath:
+            path: /nix/var/nix/daemon-socket
+            type: Directory
+        # Created by nixosModules.node on the host-store arms.
+        - name: gcroots
+          hostPath:
+            path: /nix/var/nix/gcroots/k3snix
+            type: DirectoryOrCreate
+        - name: kubelet-pods
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        - name: catalog
+          configMap:
+            name: k3snix-catalog
+---
+# Headless: resolves to every agent's node IP, so agents find their peers
+# without a Kubernetes client.
+apiVersion: v1
+kind: Service
+metadata:
+  name: k3snix-agent-peers
+  namespace: k3snix
+  labels:
+    app: k3snix-agent
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: k3snix-agent
+  ports:
+    - port: 9860
+      targetPort: 9860
