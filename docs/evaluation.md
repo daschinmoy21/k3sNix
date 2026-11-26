@@ -120,6 +120,27 @@ Rules:
   runtime, is shared by every cluster. Only hardware and network settings
   differ. NixOS is required only for `k3snix-snapshotter`, but using it on
   every node keeps the OS constant.
+
+  The configuration is `nixosModules.node` (`nix/node.nix`). A cluster
+  imports it with its own hardware module and sets `k3snix.node`: `arm`,
+  `runtime`, `role`, `serverAddr`, `tokenFile`, `privateInterface` and,
+  for the OCI arms, `registry`. Every variant:
+
+  - runs the same K3s, with traefik and servicelb disabled on every arm,
+    and labels the node `k3snix.io/arm` and `k3snix.io/runtime`;
+  - on `docker`, starts K3s with `--docker`, and both runtimes pull from
+    the in-cluster registry over plain HTTP;
+  - disables the kubelet's image GC and automatic nix GC, since stores are
+    reset between runs and never collected during one;
+  - on the host-store arms, prepares `/nix/var/nix/gcroots/k3snix` for the
+    agent's per-pod roots;
+  - opens only SSH publicly. The K3s, kubelet, flannel, agent and registry
+    ports are opened on `privateInterface` alone.
+
+  The `nodeVariants` flake check evaluates every arm, runtime and role and
+  checks those differences. `k3snix-snapshotter` is not yet a variant: it is
+  added, importing `nixosModules.k3s-with-snapshotter`, only if the #1 spike
+  succeeds.
 - At least one server and three workers per cluster (the paper used one and
   four).
 - The agent (9860), origin, and registry listen only on the private network.
